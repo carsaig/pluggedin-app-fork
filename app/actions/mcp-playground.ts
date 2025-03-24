@@ -1,13 +1,20 @@
 'use server';
 
 import { ChatAnthropic } from '@langchain/anthropic';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import { MemorySaver } from '@langchain/langgraph';
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import { ChatOpenAI } from '@langchain/openai';
 
 import { getMcpServers } from '@/app/actions/mcp-servers';
-import { convertMcpToLangchainTools, McpServerCleanupFn } from '@/lib/langchain-mcp-tools-ts/dist/langchain-mcp-tools.js';
+import { 
+  convertMcpToLangchainTools, 
+  McpServerCleanupFn,
+  EnhancedLogCapture
+} from '@/lib/langchain-mcp-tools-ts/dist/langchain-mcp-tools.js';
+import {
+  LogEntry
+} from '@/lib/langchain-mcp-tools-ts/dist/logger.js';
 
 // Cache for Anthropic models with last fetch time
 interface ModelCache {
@@ -25,6 +32,7 @@ interface McpPlaygroundSession {
   agent: ReturnType<typeof createReactAgent>;
   cleanup: McpServerCleanupFn;
   lastActive: Date;
+  logs: LogEntry[];
 }
 
 // Map to store active sessions by profile UUID
@@ -48,7 +56,7 @@ function cleanupInactiveSessions() {
 setInterval(cleanupInactiveSessions, 10 * 60 * 1000);
 
 // Function to safely process message content
-function safeProcessContent(content: any): string {
+function safeProcessContent(content: any): any {
   if (content === null || content === undefined) {
     return 'No content';
   }
@@ -57,9 +65,14 @@ function safeProcessContent(content: any): string {
     return content;
   }
   
-  // Handle arrays
+  // Handle arrays - preserve structure for frontend visualization
   if (Array.isArray(content)) {
     try {
+      // Return array directly if it's not too large
+      if (content.length <= 100) {
+        return content;
+      }
+      // For larger arrays, convert to string
       return content.map(item => {
         if (typeof item === 'object') {
           return JSON.stringify(item);
@@ -71,7 +84,7 @@ function safeProcessContent(content: any): string {
     }
   }
   
-  // Handle objects
+  // Handle objects - preserve structure for frontend visualization
   if (typeof content === 'object') {
     try {
       // Special handling for objects with type and text fields (common pattern in some frameworks)
@@ -81,7 +94,16 @@ function safeProcessContent(content: any): string {
       
       // If it has a toString method that's not the default Object.toString
       if (content.toString && content.toString !== Object.prototype.toString) {
-        return content.toString();
+        const stringValue = content.toString();
+        if (stringValue !== '[object Object]') {
+          return stringValue;
+        }
+      }
+      
+      // Check if object is not too complex (fewer than 100 keys at top level)
+      if (Object.keys(content).length <= 100) {
+        // Return object directly for frontend visualization
+        return content;
       }
       
       // Last resort: stringify the object
@@ -219,6 +241,7 @@ export async function getOrCreatePlaygroundSession(
     model: string;
     temperature?: number;
     maxTokens?: number;
+    logLevel?: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   }
 ) {
   // If session exists and is active, return it
@@ -226,8 +249,14 @@ export async function getOrCreatePlaygroundSession(
   if (existingSession) {
     // Update last active timestamp
     existingSession.lastActive = new Date();
-    return { success: true };
+    return { 
+      success: true,
+      logs: existingSession.logs
+    };
   }
+
+  // Create a enhanced log capture instance for detailed logs
+  const enhancedLogCapture = new EnhancedLogCapture();
 
   try {
     // Get all MCP servers for the profile
@@ -248,42 +277,61 @@ export async function getOrCreatePlaygroundSession(
         url: server.url,
         type: server.type
       };
+      
+      // Manually add initialization log
+      enhancedLogCapture.capture(
+        'info', 
+        `Initializing MCP server "${server.name}" (${server.type || 'custom'})`,
+        undefined,
+        'app'
+      );
     });
     
     // Initialize LLM
     const llm = initChatModel(llmConfig);
     
-    // Convert MCP servers to LangChain tools
-    const { tools, cleanup } = await convertMcpToLangchainTools(
+    // Convert MCP servers to LangChain tools with enhanced logging
+    const { tools, cleanup, logs } = await convertMcpToLangchainTools(
       mcpServersConfig,
-      { logLevel: 'info' }
+      { 
+        logLevel: llmConfig.logLevel || 'info',
+        enhancedLogCapture 
+      }
     );
     
-    // Create agent
+    // Create agent - cast the tools array to the expected type
     const agent = createReactAgent({
       llm,
-      tools,
+      tools: tools as any,
       checkpointSaver: new MemorySaver(),
     });
     
-    // Store session
+    // Store session with enhanced logs
     activeSessions.set(profileUuid, {
       agent,
       cleanup,
-      lastActive: new Date()
+      lastActive: new Date(),
+      logs: enhancedLogCapture.getAll()
     });
     
-    return { success: true };
+    // Return success with logs
+    return { 
+      success: true,
+      logs: enhancedLogCapture.getAll()
+    };
   } catch (error) {
     console.error('Failed to create playground session:', error);
+    
+    // Return error with any logs captured
     return { 
       success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      logs: enhancedLogCapture.getAll()
     };
   }
 }
 
-// Execute a query against the playground agent
+// Execute a query using the active playground session
 export async function executePlaygroundQuery(
   profileUuid: string,
   query: string
@@ -292,91 +340,195 @@ export async function executePlaygroundQuery(
   if (!session) {
     return { 
       success: false, 
-      error: 'No active session found. Please start a new session.' 
+      error: 'No active session. Start a new session before executing queries.' 
     };
   }
+
+  // Create a new log capture for this query execution
+  const queryLogCapture = new EnhancedLogCapture();
   
+  // Add initial query log
+  queryLogCapture.capture(
+    'info',
+    `Executing query: "${query}"`,
+    undefined,
+    'app'
+  );
+
   try {
     // Update last active timestamp
     session.lastActive = new Date();
     
-    // Execute query
-    const agentFinalState = await session.agent.invoke(
-      { messages: [new HumanMessage(query)] },
-      { configurable: { thread_id: profileUuid } }
+    const { agent } = session;
+    const messages: { role: string; content: any; name?: string }[] = [];
+    
+    // Execute the query
+    const result = await agent.invoke(
+      {
+        messages: [new HumanMessage(query)]
+      },
+      {
+        configurable: {
+          thread_id: `${profileUuid}-${Date.now()}`
+        }
+      }
     );
     
-    // Process the result
-    let result: string;
-    const lastMessage = agentFinalState.messages[agentFinalState.messages.length - 1];
-    if (lastMessage instanceof AIMessage) {
-      result = safeProcessContent(lastMessage.content);
-    } else {
-      result = safeProcessContent(lastMessage.content);
+    // Add the user message
+    messages.push({
+      role: 'human',
+      content: query
+    });
+    
+    // Process tool messages from the agent trace
+    if (result && result.steps) {
+      for (const step of result.steps) {
+        // If this is a tool action step
+        if (step.action && step.action.tool) {
+          const toolName = step.action.tool;
+          const toolInput = step.action.toolInput;
+          
+          // Log tool usage
+          queryLogCapture.capture(
+            'info',
+            `Tool called: ${toolName}`,
+            toolInput,
+            'execution'
+          );
+          
+          // Add tool request message
+          messages.push({
+            role: 'tool_request',
+            content: typeof toolInput === 'object' ? JSON.stringify(toolInput, null, 2) : String(toolInput),
+            name: toolName
+          });
+          
+          // Add tool response message if available
+          if (step.observation !== undefined) {
+            messages.push({
+              role: 'tool',
+              content: step.observation,
+              name: toolName
+            });
+            
+            // Log tool response
+            queryLogCapture.capture(
+              'info',
+              `Tool response: ${toolName}`,
+              step.observation,
+              'response'
+            );
+          }
+        }
+      }
     }
     
-    // Get all messages for display with debugging information
-    const messages = agentFinalState.messages.map((message: any, index: number) => {
-      // Add debugging information
-      const contentType = typeof message.content;
-      const contentKeys = message.content && typeof message.content === 'object' ? 
-        Object.keys(message.content) : [];
+    // Add the AI response
+    if (result && result.messages && result.messages.length > 0) {
+      const aiMessage = result.messages[result.messages.length - 1];
+      messages.push({
+        role: 'ai',
+        content: safeProcessContent(aiMessage.content)
+      });
       
-      const debugInfo = `[DEBUG: Message ${index}, Type: ${message.constructor.name}, Content type: ${contentType}, Keys: ${contentKeys.join(',')}]`;
-      
-      if (message instanceof HumanMessage) {
-        return { 
-          role: 'human', 
-          content: message.content,
-          debug: debugInfo
-        };
-      } else if (message instanceof AIMessage) {
-        return { 
-          role: 'ai', 
-          content: safeProcessContent(message.content),
-          debug: debugInfo
-        };
-      } else {
-        return { 
-          role: 'tool', 
-          content: safeProcessContent(message.content),
-          debug: debugInfo
-        };
-      }
-    });
+      // Log AI response
+      queryLogCapture.capture(
+        'info',
+        'AI response generated',
+        undefined,
+        'response'
+      );
+    }
+    
+    // Debug information
+    const debug = {
+      messageCount: messages.length,
+      toolMessages: messages.filter(m => m.role === 'tool' || m.role === 'tool_request').length,
+      lastMessageContentType: messages.length > 0 
+        ? typeof messages[messages.length - 1].content 
+        : 'none',
+      agentSteps: result.steps ? result.steps.length : 0
+    };
+    
+    // Merge query logs with session logs
+    session.logs = [...session.logs, ...queryLogCapture.getAll()];
     
     return { 
       success: true, 
-      result, 
       messages,
-      debug: {
-        messageCount: agentFinalState.messages.length,
-        messageTypes: agentFinalState.messages.map((m: any) => m.constructor.name),
-        lastMessageContentType: typeof agentFinalState.messages[agentFinalState.messages.length - 1].content
-      }
+      debug,
+      logs: queryLogCapture.getAll()
     };
   } catch (error) {
-    console.error('Error executing playground query:', error);
+    console.error('Error executing query:', error);
+    
+    // Log the error
+    queryLogCapture.capture(
+      'error',
+      `Query execution error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error,
+      'error'
+    );
+    
+    // Merge error logs with session logs
+    session.logs = [...session.logs, ...queryLogCapture.getAll()];
+    
     return { 
       success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+      error: error instanceof Error ? error.message : 'Unknown error during query execution',
+      logs: queryLogCapture.getAll()
     };
   }
 }
 
 // End a playground session for a profile
-export async function endPlaygroundSession(profileUuid: string) {
+export async function endPlaygroundSession(
+  profileUuid: string
+) {
   const session = activeSessions.get(profileUuid);
   if (session) {
     try {
+      // Create a log capture for cleanup
+      const cleanupLogCapture = new EnhancedLogCapture();
+      
+      // Log cleanup start
+      cleanupLogCapture.capture(
+        'info',
+        'Ending MCP playground session...',
+        undefined,
+        'app'
+      );
+      
+      // Run cleanup
       await session.cleanup();
+      
+      // Log success
+      cleanupLogCapture.capture(
+        'info',
+        'MCP playground session ended successfully.',
+        undefined,
+        'connection'
+      );
+      
+      // Remove session
       activeSessions.delete(profileUuid);
-      return { success: true };
+      
+      return { 
+        success: true,
+        logs: cleanupLogCapture.getAll()
+      };
     } catch (error) {
       console.error('Error ending playground session:', error);
+      
       return { 
         success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        logs: [{
+          level: 'error',
+          type: 'error',
+          message: `Failed to end session: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          timestamp: new Date()
+        }]
       };
     }
   }

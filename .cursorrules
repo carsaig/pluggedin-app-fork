@@ -19,9 +19,9 @@
    - `types/mcp-server.ts` - Type definitions for MCP servers
    - `app/(sidebar-layout)/(container)/mcp-servers/` - UI for MCP server management
 
-3. MCP playground components:
-   - `app/actions/mcp-playground.ts` - Server actions for MCP playground
-   - `app/(sidebar-layout)/(container)/mcp-playground/` - UI for MCP playground
+3. Playground components:
+   - `app/actions/mcp-playground.ts` - Server actions for playground
+   - `app/(sidebar-layout)/(container)/mcp-playground/` - UI for playground
    - `app/(sidebar-layout)/(container)/mcp-playground/README.md` - Documentation
 
 ## Code Patterns
@@ -105,7 +105,7 @@
    - Additional args and env vars for execution
    - Associated with a specific profile (workspace)
 
-4. MCP Playground Session Pattern:
+4. Playground Session Pattern:
    ```typescript
    // Session storage
    const activeSessions = new Map<string, {
@@ -198,3 +198,4 @@ When implementing new features, follow these patterns:
 3. Create or update API endpoints if needed for external access
 4. Develop UI components with appropriate data fetching
 5. Add comprehensive error handling and loading states 
+6. Use pnpm

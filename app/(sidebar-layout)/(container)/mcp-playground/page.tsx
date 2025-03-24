@@ -2,15 +2,19 @@
 
 import {
   Activity,
+  CheckCircle,
   Code,
+  Loader2,
+  MinusCircle,
   Play,
   Power,
   Send,
   Server,
   Settings,
   Terminal,
+  XCircle,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 
 import {
@@ -57,6 +61,13 @@ import { useProfiles } from '@/hooks/use-profiles';
 import { useToast } from '@/hooks/use-toast';
 import { McpServer } from '@/types/mcp-server';
 
+// Connection status type
+type McpServerConnectionStatus = 
+  | 'CONNECTED'     // Successfully connected
+  | 'CONNECTING'    // In the process of connecting
+  | 'FAILED'        // Failed to connect
+  | 'DISCONNECTED'; // Not attempted connection
+
 export default function McpPlaygroundPage() {
   const { toast } = useToast();
   const { currentProfile } = useProfiles();
@@ -70,6 +81,7 @@ export default function McpPlaygroundPage() {
     model: 'claude-3-7-sonnet-20250219',
     temperature: 0,
     maxTokens: 1000,
+    logLevel: 'info',
   });
 
   // State for selected servers (will now use active servers instead of selection)
@@ -93,11 +105,37 @@ export default function McpPlaygroundPage() {
   // State for client logs
   const [clientLogs, setClientLogs] = useState<
     {
-      type: 'info' | 'error' | 'connection' | 'execution' | 'response';
+      type: 'info' | 'error' | 'connection' | 'execution' | 'response' | 'debug' | 'warn' | 'trace' | 'fatal';
       message: string;
       timestamp: Date;
     }[]
   >([]);
+
+  // Log filter state
+  const [logFilters, setLogFilters] = useState<{
+    [key in 'info' | 'error' | 'connection' | 'execution' | 'response' | 'debug' | 'warn' | 'trace' | 'fatal']: boolean
+  }>({
+    info: true,
+    error: true,
+    connection: true,
+    execution: true,
+    response: true,
+    debug: true,
+    warn: true,
+    trace: true,
+    fatal: true
+  });
+  
+  // Toggle log filter
+  const toggleLogFilter = (type: keyof typeof logFilters) => {
+    setLogFilters(prev => ({
+      ...prev,
+      [type]: !prev[type]
+    }));
+  };
+  
+  // Filtered logs
+  const filteredLogs = clientLogs.filter(log => logFilters[log.type]);
 
   // Auto scroll to bottom of messages and logs
   useEffect(() => {
@@ -110,15 +148,14 @@ export default function McpPlaygroundPage() {
   }, [messages, clientLogs]);
 
   // Helper to add a log entry
-  const addLog = (
-    type: 'info' | 'error' | 'connection' | 'execution' | 'response',
-    message: string
-  ) => {
-    setClientLogs((prev) => [
-      ...prev,
-      { type, message, timestamp: new Date() },
-    ]);
+  const addLog = (type: 'info' | 'error' | 'connection' | 'execution' | 'response' | 'debug' | 'warn' | 'trace' | 'fatal', message: string) => {
+    // Strip any remaining ANSI color codes that might have been missed
+    const cleanMessage = message.replace(/\u001b\[\d+(;\d+)*m/g, '');
+    setClientLogs(prev => [...prev, { type, message: cleanMessage, timestamp: new Date() }]);
   };
+
+  // Connection status state
+  const [connectionStatus, setConnectionStatus] = useState<Record<string, McpServerConnectionStatus>>({});
 
   // Fetch MCP servers
   const {
@@ -128,6 +165,15 @@ export default function McpPlaygroundPage() {
   } = useSWR(profileUuid ? `${profileUuid}/mcp-servers` : null, () =>
     getMcpServers(profileUuid)
   );
+
+  // Server name to UUID mapping for log processing
+  const serverNameToUuid = useMemo(() => {
+    const mapping: Record<string, string> = {};
+    mcpServers?.forEach(server => {
+      mapping[server.name] = server.uuid;
+    });
+    return mapping;
+  }, [mcpServers]);
 
   // Toggle server status
   const toggleServerStatus = async (serverUuid: string, status: boolean) => {
@@ -164,16 +210,9 @@ export default function McpPlaygroundPage() {
     }
   };
 
-  // Start session - update to use active servers instead of selected servers
+  // Start session
   const startSession = async () => {
-    if (!mcpServers) return;
-
-    // Filter only ACTIVE servers
-    const activeServerUuids = mcpServers
-      .filter((server) => server.status === 'ACTIVE')
-      .map((server) => server.uuid);
-
-    if (activeServerUuids.length === 0) {
+    if (mcpServers?.filter((s) => s.status === 'ACTIVE').length === 0) {
       toast({
         title: 'Error',
         description: 'Please activate at least one MCP server.',
@@ -186,48 +225,52 @@ export default function McpPlaygroundPage() {
     try {
       setIsProcessing(true);
       addLog('info', 'Starting MCP playground session...');
-      addLog('info', `Active servers: ${activeServerUuids.length}`);
-      addLog(
-        'info',
-        `LLM config: ${llmConfig.provider} ${llmConfig.model} (temp: ${llmConfig.temperature})`
-      );
-
+      addLog('info', `Active servers: ${mcpServers.filter((s) => s.status === 'ACTIVE').length}`);
+      addLog('info', `LLM config: ${llmConfig.provider} ${llmConfig.model} (temp: ${llmConfig.temperature}, log: ${llmConfig.logLevel})`);
+      
+      // Set all active servers to CONNECTING state
+      const initialConnectionStatus: Record<string, McpServerConnectionStatus> = {};
+      mcpServers?.filter(s => s.status === 'ACTIVE').forEach(server => {
+        initialConnectionStatus[server.uuid] = 'CONNECTING';
+      });
+      setConnectionStatus(initialConnectionStatus);
+      
       const result = await getOrCreatePlaygroundSession(
         profileUuid,
-        activeServerUuids,
+        mcpServers.filter((s) => s.status === 'ACTIVE').map((s) => s.uuid),
         {
           provider: llmConfig.provider as 'openai' | 'anthropic',
           model: llmConfig.model,
           temperature: llmConfig.temperature,
           maxTokens: llmConfig.maxTokens,
+          logLevel: llmConfig.logLevel,
         }
       );
-
+      
       if (result.success) {
         setIsSessionActive(true);
         setMessages([]);
         addLog('connection', 'MCP playground session started successfully.');
+        
         // Add logs for each active server
-        const activeServers =
-          mcpServers.filter((server) =>
-            activeServerUuids.includes(server.uuid)
-          ) || [];
+        const activeServers = mcpServers.filter((s) => s.status === 'ACTIVE');
         activeServers.forEach((server) => {
-          addLog(
-            'connection',
-            `Connected to "${server.name} (${server.type})"`
-          );
+          addLog('connection', `Connected to "${server.name} (${server.type})"`);
         });
-
+        
+        // Process any logs returned from the server
+        processLogs(result.logs);
+        
         toast({
           title: 'Success',
           description: 'MCP playground session started.',
         });
       } else {
-        addLog(
-          'error',
-          `Failed to start session: ${result.error || 'Unknown error'}`
-        );
+        addLog('error', `Failed to start session: ${result.error || 'Unknown error'}`);
+        
+        // Process any error logs
+        processLogs(result.logs);
+        
         toast({
           title: 'Error',
           description: result.error || 'Failed to start session.',
@@ -236,10 +279,7 @@ export default function McpPlaygroundPage() {
       }
     } catch (error) {
       console.error('Failed to start session:', error);
-      addLog(
-        'error',
-        `Exception: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      addLog('error', `Exception: ${error instanceof Error ? error.message : 'Unknown error'}`);
       toast({
         title: 'Error',
         description: 'An unexpected error occurred.',
@@ -255,33 +295,38 @@ export default function McpPlaygroundPage() {
     try {
       setIsProcessing(true);
       addLog('info', 'Ending MCP playground session...');
-
+      
       const result = await endPlaygroundSession(profileUuid);
-
+      
       if (result.success) {
         setIsSessionActive(false);
         addLog('connection', 'MCP playground session ended successfully.');
+        
+        // Process any logs returned from the server
+        processLogs(result.logs);
+        
         toast({
           title: 'Success',
           description: 'MCP playground session ended.',
         });
       } else {
-        addLog(
-          'error',
-          `Failed to end session: ${result.error || 'Unknown error'}`
-        );
+        addLog('error', `Failed to end session: ${result.error || 'Unknown error'}`);
+        
+        // Process any error logs
+        processLogs(result.logs);
+        
         toast({
           title: 'Error',
           description: result.error || 'Failed to end session.',
           variant: 'destructive',
         });
       }
+      
+      // Reset connection statuses when session ends
+      setConnectionStatus({});
     } catch (error) {
       console.error('Failed to end session:', error);
-      addLog(
-        'error',
-        `Exception: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      addLog('error', `Exception: ${error instanceof Error ? error.message : 'Unknown error'}`);
       toast({
         title: 'Error',
         description: 'An unexpected error occurred.',
@@ -298,105 +343,150 @@ export default function McpPlaygroundPage() {
 
     try {
       setIsProcessing(true);
-
+      
       // Add user message
-      const userMessage = {
-        role: 'human',
+      const userMessage = { 
+        role: 'human', 
         content: inputValue,
-        timestamp: new Date(),
+        timestamp: new Date()
       };
-      setMessages((prev) => [...prev, userMessage]);
+      setMessages(prev => [...prev, userMessage]);
       setInputValue('');
-
+      
       addLog('execution', `Executing query: "${userMessage.content}"`);
 
       // Execute query
-      const result = await executePlaygroundQuery(
-        profileUuid,
-        userMessage.content
-      );
-
+      const result = await executePlaygroundQuery(profileUuid, userMessage.content);
+      
       if (result.success) {
         addLog('response', 'Query executed successfully');
-
+        
+        // Process any logs returned from the server
+        processLogs(result.logs);
+        
         // Log debug information
         if (result.debug) {
-          addLog(
-            'info',
-            `Messages: ${result.debug.messageCount}, Last content type: ${result.debug.lastMessageContentType}`
-          );
+          if (llmConfig.logLevel === 'info') {
+            addLog('info', `Messages: ${result.debug.messageCount}, Last content type: ${result.debug.lastMessageContentType}`);
+          }
         }
-
+        
         // Add all messages from the result
         if (result.messages) {
           // Filter out messages we already have
-          const currentMessageContents = messages.map((m) => m.content);
+          const currentMessageContents = messages.map(m => m.content);
           const newMessages = result.messages.filter(
             (m: any) => !currentMessageContents.includes(m.content)
           );
-
+          
           if (newMessages.length > 0) {
             // Add timestamp to each message
             const timestampedMessages = newMessages.map((m: any) => ({
               ...m,
-              timestamp: new Date(),
+              timestamp: new Date()
             }));
-
-            setMessages((prev) => [...prev, ...timestampedMessages]);
-
+            
+            setMessages(prev => [...prev, ...timestampedMessages]);
+            
             // Log tool messages separately
             timestampedMessages.forEach((msg: any) => {
               if (msg.role === 'tool') {
-                addLog(
-                  'execution',
-                  `Tool execution: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}`
-                );
+                addLog('execution', `Tool execution: ${msg.name || 'unknown'}`);
               }
             });
           }
         }
       } else {
-        addLog(
-          'error',
-          `Failed to execute query: ${result.error || 'Unknown error'}`
-        );
+        addLog('error', `Failed to execute query: ${result.error || 'Unknown error'}`);
+        
+        // Process any error logs
+        processLogs(result.logs);
+        
         toast({
           title: 'Error',
           description: result.error || 'Failed to execute query.',
           variant: 'destructive',
         });
         // Add error message to chat
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'ai',
+        setMessages(prev => [
+          ...prev, 
+          { 
+            role: 'ai', 
             content: `Error: ${result.error || 'Failed to execute query.'}`,
-            timestamp: new Date(),
-          },
+            timestamp: new Date()
+          }
         ]);
       }
     } catch (error) {
       console.error('Failed to send message:', error);
-      addLog(
-        'error',
-        `Exception: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      addLog('error', `Exception: ${error instanceof Error ? error.message : 'Unknown error'}`);
       toast({
         title: 'Error',
         description: 'An unexpected error occurred.',
         variant: 'destructive',
       });
       // Add error message to chat
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'ai',
+      setMessages(prev => [
+        ...prev, 
+        { 
+          role: 'ai', 
           content: 'An unexpected error occurred.',
-          timestamp: new Date(),
-        },
+          timestamp: new Date()
+        }
       ]);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Process logs returned from backend actions
+  const processLogs = (logs: any[] | undefined) => {
+    if (!logs || logs.length === 0) return;
+    
+    const newConnectionStatuses: Record<string, McpServerConnectionStatus> = { ...connectionStatus };
+    
+    logs.forEach(log => {
+      // Determine log type based on log entry
+      let logType: 'info' | 'error' | 'connection' | 'execution' | 'response' | 'debug' | 'warn' | 'trace' | 'fatal' = 'info';
+      
+      // If it's already an enhanced log entry with type
+      if (log.type) {
+        logType = log.type as any;
+      } 
+      // If it's a legacy log format with just level
+      else if (log.level) {
+        logType = log.level === 'error' ? 'error' : 
+                  log.level === 'warn' ? 'warn' : 
+                  log.level === 'debug' ? 'debug' : 
+                  log.level === 'trace' ? 'trace' : 
+                  log.level === 'fatal' ? 'fatal' : 'info';
+      }
+      
+      // Add the log to the client logs
+      addLog(logType, log.message);
+      
+      // Update connection status based on log message
+      const serverNameMatch = log.message.match(/MCP server "([^"]+)":/);
+      const serverName = serverNameMatch?.[1];
+      
+      if (serverName && serverNameToUuid[serverName]) {
+        const serverUuid = serverNameToUuid[serverName];
+        
+        if (log.message.includes('connected') && log.type === 'connection') {
+          newConnectionStatuses[serverUuid] = 'CONNECTED';
+        } else if (log.message.includes('failed to initialize') || 
+                  log.message.includes('Connection closed') ||
+                  log.message.includes('MCP error')) {
+          newConnectionStatuses[serverUuid] = 'FAILED';
+        } else if (log.message.includes('initializing') && !newConnectionStatuses[serverUuid]) {
+          newConnectionStatuses[serverUuid] = 'CONNECTING';
+        }
+      }
+    });
+    
+    // Update connection statuses if any changes
+    if (Object.keys(newConnectionStatuses).length > 0) {
+      setConnectionStatus(prev => ({...prev, ...newConnectionStatuses}));
     }
   };
 
@@ -525,17 +615,41 @@ export default function McpPlaygroundPage() {
                                       {server.name}
                                     </div>
                                     {server.status === 'ACTIVE' ? (
-                                      <Badge
-                                        variant='outline'
-                                        className='ml-2 bg-green-500/10 text-green-700 border-green-200'>
-                                        Active
-                                      </Badge>
+                                      connectionStatus[server.uuid] ? (
+                                        <Badge
+                                          variant='outline'
+                                          className={`ml-2 ${
+                                            connectionStatus[server.uuid] === 'CONNECTED' 
+                                              ? 'bg-green-500/10 text-green-700 border-green-200'
+                                              : connectionStatus[server.uuid] === 'FAILED'
+                                              ? 'bg-red-500/10 text-red-700 border-red-200'
+                                              : 'bg-blue-500/10 text-blue-700 border-blue-200'
+                                          }`}>
+                                          {connectionStatus[server.uuid] === 'CONNECTED' && (
+                                            <CheckCircle className="mr-1 h-3 w-3" />
+                                          )}
+                                          {connectionStatus[server.uuid] === 'FAILED' && (
+                                            <XCircle className="mr-1 h-3 w-3" />
+                                          )}
+                                          {connectionStatus[server.uuid] === 'CONNECTING' && (
+                                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                          )}
+                                          {connectionStatus[server.uuid]}
+                                        </Badge>
+                                      ) : (
+                                        <Badge
+                                          variant='outline'
+                                          className='ml-2 bg-amber-500/10 text-amber-700 border-amber-200'>
+                                          Active
+                                        </Badge>
+                                      )
                                     ) : (
                                       <Badge
                                         variant='outline'
                                         className='ml-2 bg-amber-500/10 text-amber-700 border-amber-200'>
-                                        Inactive
-                                      </Badge>
+                                          <MinusCircle className="mr-1 h-3 w-3" />
+                                          Inactive
+                                        </Badge>
                                     )}
                                   </div>
                                   <div className='text-sm text-muted-foreground flex items-center'>
@@ -572,6 +686,11 @@ export default function McpPlaygroundPage() {
                                     {server.type}
                                   </Badge>
                                 </p>
+                                {connectionStatus[server.uuid] === 'FAILED' && (
+                                  <p className='text-xs text-red-600'>
+                                    Connection failed
+                                  </p>
+                                )}
                                 {server.command && (
                                   <p className='text-xs'>
                                     Command: {server.command}
@@ -758,6 +877,75 @@ export default function McpPlaygroundPage() {
                       </Button>
                     )}
                   </div>
+
+                  {/* Log level filters */}
+                  <div className='flex flex-wrap gap-1.5 mb-2'>
+                    <Badge 
+                      variant={logFilters.trace ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.trace ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "text-gray-400"}`}
+                      onClick={() => toggleLogFilter('trace')}
+                    >
+                      Trace
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.debug ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.debug ? "bg-blue-100 hover:bg-blue-200 text-blue-700" : "text-blue-400"}`}
+                      onClick={() => toggleLogFilter('debug')}
+                    >
+                      Debug
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.info ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.info ? "bg-blue-200 hover:bg-blue-300 text-blue-800" : "text-blue-400"}`}
+                      onClick={() => toggleLogFilter('info')}
+                    >
+                      Info
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.warn ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.warn ? "bg-yellow-100 hover:bg-yellow-200 text-yellow-800" : "text-yellow-400"}`}
+                      onClick={() => toggleLogFilter('warn')}
+                    >
+                      Warn
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.error ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.error ? "bg-red-100 hover:bg-red-200 text-red-800" : "text-red-400"}`}
+                      onClick={() => toggleLogFilter('error')}
+                    >
+                      Error
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.fatal ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.fatal ? "bg-red-500 hover:bg-red-600 text-white" : "text-red-400"}`}
+                      onClick={() => toggleLogFilter('fatal')}
+                    >
+                      Fatal
+                    </Badge>
+                    <Separator orientation="vertical" className="h-6" />
+                    <Badge 
+                      variant={logFilters.connection ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.connection ? "bg-green-100 hover:bg-green-200 text-green-800" : "text-green-400"}`}
+                      onClick={() => toggleLogFilter('connection')}
+                    >
+                      Connection
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.execution ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.execution ? "bg-amber-100 hover:bg-amber-200 text-amber-800" : "text-amber-400"}`}
+                      onClick={() => toggleLogFilter('execution')}
+                    >
+                      Execution
+                    </Badge>
+                    <Badge 
+                      variant={logFilters.response ? "default" : "outline"} 
+                      className={`cursor-pointer ${logFilters.response ? "bg-purple-100 hover:bg-purple-200 text-purple-800" : "text-purple-400"}`}
+                      onClick={() => toggleLogFilter('response')}
+                    >
+                      Response
+                    </Badge>
+                  </div>
+
                   <ScrollArea className='h-[calc(100vh-24rem)] border rounded-md bg-muted/20'>
                     <div className='p-3 font-mono text-xs space-y-1.5'>
                       {clientLogs.length === 0 ? (
@@ -765,7 +953,7 @@ export default function McpPlaygroundPage() {
                           No logs available. Start a session to see logs.
                         </div>
                       ) : (
-                        clientLogs.map((log, index) => (
+                        filteredLogs.map((log, index) => (
                           <div key={index} className='flex'>
                             <div className='text-muted-foreground mr-2'>
                               [{log.timestamp.toLocaleTimeString()}]
@@ -773,7 +961,11 @@ export default function McpPlaygroundPage() {
                             <div
                               className={`
                               ${log.type === 'info' ? 'text-blue-500' : ''}
+                              ${log.type === 'debug' ? 'text-blue-300' : ''}
+                              ${log.type === 'trace' ? 'text-gray-400' : ''}
+                              ${log.type === 'warn' ? 'text-yellow-500' : ''}
                               ${log.type === 'error' ? 'text-red-500' : ''}
+                              ${log.type === 'fatal' ? 'text-red-700 font-bold bg-red-100 px-1 rounded' : ''}
                               ${log.type === 'connection' ? 'text-green-500' : ''}
                               ${log.type === 'execution' ? 'text-amber-500' : ''}
                               ${log.type === 'response' ? 'text-purple-500' : ''}
@@ -846,30 +1038,21 @@ export default function McpPlaygroundPage() {
                                 : 'bg-secondary'
                           }`}>
                           {message.timestamp && (
-                            <div className='text-xs text-muted-foreground/70 mb-1'>
+                            <div className="text-xs text-muted-foreground/70 mb-1">
                               {message.timestamp.toLocaleTimeString()}
                             </div>
                           )}
-
-                          {message.role === 'tool' && (
-                            <div className='text-xs text-muted-foreground mb-1 flex items-center'>
-                              <Code className='h-3 w-3 mr-1' />
-                              Tool Execution
-                            </div>
-                          )}
-
-                          <div className='whitespace-pre-wrap'>
-                            {typeof message.content === 'string'
-                              ? message.content
-                              : 'Complex content (see console)'}
+                          
+                          <div className="whitespace-pre-wrap">
+                            {message.content}
                           </div>
-
+                          
                           {message.debug && (
-                            <details className='mt-1 text-xs opacity-50'>
-                              <summary className='cursor-pointer hover:text-primary'>
+                            <details className="mt-1 text-xs opacity-50">
+                              <summary className="cursor-pointer hover:text-primary">
                                 Debug Info
                               </summary>
-                              <div className='p-1 mt-1 bg-black/10 rounded'>
+                              <div className="p-1 mt-1 bg-black/10 rounded">
                                 {message.debug}
                               </div>
                             </details>
@@ -883,14 +1066,12 @@ export default function McpPlaygroundPage() {
               </ScrollArea>
             </CardContent>
             <Separator />
-            <CardFooter className='p-4'>
-              <div className='flex w-full items-center space-x-2'>
+            <CardFooter className="p-4">
+              <div className="flex w-full items-center space-x-2">
                 <Textarea
-                  placeholder={
-                    isSessionActive
-                      ? 'Type your message...'
-                      : 'Start a session to begin chatting'
-                  }
+                  placeholder={isSessionActive 
+                    ? "Type your message..." 
+                    : "Start a session to begin chatting"}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -900,16 +1081,15 @@ export default function McpPlaygroundPage() {
                     }
                   }}
                   disabled={!isSessionActive || isProcessing}
-                  className='flex-1 min-h-10 resize-none bg-background border-muted-foreground/20'
+                  className="flex-1 min-h-10 resize-none bg-background border-muted-foreground/20"
                 />
-                <Button
-                  size='icon'
+                <Button 
+                  size="icon"
                   onClick={sendMessage}
-                  disabled={
-                    !isSessionActive || !inputValue.trim() || isProcessing
-                  }
-                  className={`transition-all ${isProcessing ? 'animate-pulse' : ''}`}>
-                  <Send className='h-4 w-4' />
+                  disabled={!isSessionActive || !inputValue.trim() || isProcessing}
+                  className={`transition-all ${isProcessing ? 'animate-pulse' : ''}`}
+                >
+                  <Send className="h-4 w-4" />
                 </Button>
               </div>
             </CardFooter>
