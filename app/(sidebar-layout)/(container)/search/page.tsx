@@ -1,6 +1,18 @@
 'use client';
 
-import { Filter, Layers, SortDesc } from 'lucide-react';
+import { 
+  Search, 
+  Filter, 
+  Layers, 
+  SortDesc, 
+  Package, 
+  Github, 
+  Globe,
+  Sparkles,
+  CheckCircle,
+  X,
+  ChevronDown
+} from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
@@ -10,65 +22,96 @@ import useSWR from 'swr';
 import { getMcpServers } from '@/app/actions/mcp-servers';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { McpServerSource } from '@/db/schema';
-import { useAuth } from '@/hooks/use-auth'; // Import useAuth
+import { useAuth } from '@/hooks/use-auth';
 import { useProfiles } from '@/hooks/use-profiles';
+import { useRegistryCategories } from '@/hooks/use-registry-categories';
+import { useIsAdmin } from '@/hooks/use-is-admin';
+import { useCategoryCounts } from '@/hooks/use-category-counts';
 import { McpServer } from '@/types/mcp-server';
 import { McpIndex, McpServerCategory, PaginatedSearchResult } from '@/types/search';
 import { getCategoryIcon } from '@/utils/categories';
+import { cn } from '@/lib/utils';
 
 import CardGrid from './components/CardGrid';
 import { PaginationUi } from './components/PaginationUi';
-import { useFilteredResults } from './hooks/useFilteredResults';
-import { useSortedResults } from './hooks/useSortedResults';
+import { BatchFixDialog } from './components/BatchFixDialog';
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 12;
 
-type SortOption = 'relevance' | 'popularity' | 'recent' | 'stars';
+type SortOption = 'relevance' | 'popularity' | 'recent' | 'stars' | 'name';
 
 function SearchContent() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
+  
+  // URL params
   const query = searchParams.get('query') || '';
   const offset = parseInt(searchParams.get('offset') || '0');
-  const sourceParam = searchParams.get('source') || McpServerSource.COMMUNITY;
   const sortParam = (searchParams.get('sort') as SortOption) || 'relevance';
-  const tagsParam = searchParams.get('tags') || '';
   const categoryParam = searchParams.get('category') || '';
+  const featuredParam = searchParams.get('featured') === 'true';
+  const verifiedParam = searchParams.get('verified') === 'true';
   
+  // State
   const [searchQuery, setSearchQuery] = useState(query);
-  const [source, setSource] = useState<string>(sourceParam);
   const [sort, setSort] = useState<SortOption>(sortParam);
-  const [tags, setTags] = useState<string[]>(tagsParam ? tagsParam.split(',') : []);
-  const [category, setCategory] = useState<McpServerCategory | ''>( 
+  const [category, setCategory] = useState<McpServerCategory | ''>(
     categoryParam as McpServerCategory || ''
   );
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
-  const [availableCategories, setAvailableCategories] = useState<McpServerCategory[]>([]);
+  const [showFeatured, setShowFeatured] = useState(featuredParam);
+  const [showVerified, setShowVerified] = useState(verifiedParam);
+  const [categoriesOpen, setCategoriesOpen] = useState(true);
+  const [showBatchFix, setShowBatchFix] = useState(false);
+  
   const { currentProfile } = useProfiles();
-  const { session } = useAuth(); // Use the auth hook
-  const currentUsername = session?.user?.username; // Get username from session
+  const { session } = useAuth();
+  const currentUsername = session?.user?.username;
   const profileUuid = currentProfile?.uuid;
+  const isAdmin = useIsAdmin();
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('Search Page Admin Check:', {
+      isAdmin,
+      adminEnvVar: process.env.NEXT_PUBLIC_ADMIN_USERS,
+      userEmail: session?.user?.email
+    });
+  }, [isAdmin, session]);
+  
+  // Use registry categories
+  const { categories: registryCategories } = useRegistryCategories();
+  const { counts: categoryCounts } = useCategoryCounts();
+  
+  // Group categories by theme
+  const categorizedCategories = useMemo(() => {
+    const groups: Record<string, McpServerCategory[]> = {
+      'Development': ['Code', 'Developer Tools', 'Design', 'Data', 'File Management'],
+      'Communication': ['Chat', 'Email', 'Social', 'News'],
+      'Productivity': ['Productivity', 'Project Management', 'Notes', 'Automation'],
+      'Business': ['Business', 'Finance', 'Marketing', 'Jobs', 'Legal'],
+      'Entertainment': ['Entertainment', 'Gaming', 'Music', 'Video', 'Photos'],
+      'Learning': ['Education', 'Language', 'Science', 'Math'],
+      'Lifestyle': ['Health', 'Fitness', 'Food', 'Travel', 'Shopping', 'Home'],
+      'Other': ['AI', 'Crypto', 'Internet of Things', 'Security', 'Search', 'Utilities', 'Weather']
+    };
+    
+    return groups;
+  }, []);
 
-  // Fetch installed servers for the current profile
+  // Fetch installed servers
   const { data: installedServersData } = useSWR(
     profileUuid ? `${profileUuid}/installed-mcp-servers` : null,
     async () => profileUuid ? getMcpServers(profileUuid) : []
   );
 
-  // Create a memoized map for quick lookup: 'source:external_id' -> uuid
+  // Create installed server map
   const installedServerMap = useMemo(() => {
     const map = new Map<string, string>();
     if (installedServersData) {
@@ -81,95 +124,147 @@ function SearchContent() {
     return map;
   }, [installedServersData]);
 
-  // Prepare API URL with parameters
-  const apiUrl = source === 'all' 
-    ? `/api/service/search?query=${encodeURIComponent(query)}&pageSize=${PAGE_SIZE}&offset=${offset}`
-    : `/api/service/search?query=${encodeURIComponent(query)}&source=${source}&pageSize=${PAGE_SIZE}&offset=${offset}`;
+  // Build API URL with all filters
+  const apiUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    
+    if (searchQuery) {
+      params.set('search', searchQuery);
+    }
+    if (category) {
+      params.set('category', category);
+    }
+    if (showFeatured) {
+      params.set('featured', 'true');
+    }
+    if (showVerified) {
+      params.set('verified', 'true');
+    }
+    
+    // Calculate page from offset
+    const page = Math.floor(offset / PAGE_SIZE) + 1;
+    params.set('page', page.toString());
+    params.set('limit', PAGE_SIZE.toString());
+    params.set('format', 'paginated');
+    
+    // Temporarily use registry directly for demo
+    return `http://localhost:3001/servers?${params.toString()}`;
+  }, [searchQuery, category, showFeatured, showVerified, offset]);
 
-  const { data, mutate } = useSWR(
+  // Fetch search results
+  const { data, error, isLoading, mutate } = useSWR<PaginatedSearchResult>(
     apiUrl,
     async (url: string) => {
       const res = await fetch(url);
       if (!res.ok) {
         const errorText = await res.text();
-        throw new Error(
-          `Failed to fetch: ${res.status} ${res.statusText} - ${errorText}`
-        );
+        throw new Error(`Failed to fetch: ${res.status} ${res.statusText} - ${errorText}`);
       }
-      return res.json() as Promise<PaginatedSearchResult>;
+      const response = await res.json();
+      
+      // Handle both paginated and non-paginated responses
+      const registryServers = response.servers || response;
+      const pagination = response.pagination;
+      
+      // Convert registry format to our SearchIndex format
+      const results: SearchIndex = {};
+      
+      for (const server of registryServers) {
+        const key = `registry:${server.id}`;
+        
+        // Map registry server to McpIndex format
+        const mcpServer: McpIndex = {
+          name: server.name,
+          description: server.description,
+          command: server.command || (server.npmPackage ? 'npx' : ''),
+          args: server.args || (server.npmPackage ? [server.npmPackage] : []),
+          envs: server.envs || [],
+          githubUrl: server.repositoryUrl,
+          package_name: server.npmPackage || null,
+          github_stars: null,
+          package_registry: server.npmPackage ? 'npm' : null,
+          package_download_count: null,
+          source: McpServerSource.PLUGGEDIN,
+          external_id: server.id,
+          category: server.category,
+          tags: server.tags || [],
+          updated_at: server.updatedAt,
+          url: server.websiteUrl || null,
+          
+          // Registry-specific fields
+          verified: server.verified,
+          featured: server.featured,
+          
+          // Claim information
+          shared_by: server.claimedBy || server.author,
+          shared_by_profile_url: server.claimedBy ? `/to/${server.claimedBy}` : null,
+        };
+        
+        results[key] = mcpServer;
+      }
+      
+      // Use pagination data if available, otherwise estimate
+      const total = pagination ? pagination.total : offset + registryServers.length + 1;
+      const hasMore = pagination ? pagination.hasMore : registryServers.length === PAGE_SIZE;
+      
+      return {
+        results,
+        total,
+        offset,
+        pageSize: PAGE_SIZE,
+        hasMore
+      } as PaginatedSearchResult;
     }
   );
 
-  // Extract all available tags and categories from the results
-  useEffect(() => {
-    if (data?.results) {
-      const tagSet = new Set<string>();
-      const categorySet = new Set<McpServerCategory>();
-      
-      Object.values(data.results as Record<string, McpIndex>).forEach((item) => {
-        if (item.tags && item.tags.length) {
-          item.tags.forEach(tag => tagSet.add(tag));
-        }
-        if (item.category) {
-          categorySet.add(item.category);
-        }
-      });
-      
-      setAvailableTags(Array.from(tagSet).sort());
-      setAvailableCategories(Array.from(categorySet).sort());
+  // Sort results
+  const sortedResults = useMemo(() => {
+    if (!data?.results) return {};
+    
+    const entries = Object.entries(data.results);
+    
+    switch (sort) {
+      case 'name':
+        entries.sort(([, a], [, b]) => a.name.localeCompare(b.name));
+        break;
+      case 'stars':
+        entries.sort(([, a], [, b]) => (b.github_stars || 0) - (a.github_stars || 0));
+        break;
+      case 'recent':
+        entries.sort(([, a], [, b]) => 
+          new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        );
+        break;
+      case 'popularity':
+        entries.sort(([, a], [, b]) => 
+          (b.package_download_count || 0) - (a.package_download_count || 0)
+        );
+        break;
+      default:
+        // relevance - keep original order
+        break;
     }
-  }, [data]);
+    
+    return Object.fromEntries(entries);
+  }, [data?.results, sort]);
 
-  // Use the enhanced custom hooks for filtering and sorting
-  const { filter, getFilteredResults } = useFilteredResults(data?.results, tags, category);
-  const { sort: sortState, getSortedResults } = useSortedResults(data?.results, sort, getFilteredResults);
-
-  // Memoize search filters with enhanced state information
-  const searchFilters = useMemo(() => {
-    return {
-      source,
-      sort: sort,
-      tags: tags.join(','),
-      category,
-      // Include enhanced state information from hooks
-      filterState: filter,
-      sortState
-    };
-  }, [source, sort, tags, category, filter, sortState]);
-
-  // Update URL when search parameters change
+  // Update URL when filters change
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (
-        searchQuery !== query || 
-        searchFilters.source !== sourceParam || 
-        searchFilters.sort !== sortParam || 
-        searchFilters.tags !== tagsParam ||
-        searchFilters.category !== categoryParam
-      ) {
-        const params = new URLSearchParams();
-        if (searchQuery) {
-          params.set('query', searchQuery);
-        }
-        if (searchFilters.source !== 'all') {
-          params.set('source', searchFilters.source);
-        }
-        if (!searchFilters.sortState.isDefault) {
-          params.set('sort', searchFilters.sort);
-        }
-        if (searchFilters.filterState.hasTags) {
-          params.set('tags', searchFilters.tags);
-        }
-        if (searchFilters.filterState.hasCategory) {
-          params.set('category', searchFilters.category);
-        }
-        params.set('offset', '0');
-        router.push(`/search?${params.toString()}`);
-      }
-    }, 500);
+      const params = new URLSearchParams();
+      
+      if (searchQuery) params.set('query', searchQuery);
+      if (category) params.set('category', category);
+      if (showFeatured) params.set('featured', 'true');
+      if (showVerified) params.set('verified', 'true');
+      if (sort !== 'relevance') params.set('sort', sort);
+      params.set('offset', '0'); // Reset to first page
+      
+      router.push(`/search?${params.toString()}`);
+    }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, query, searchFilters, sourceParam, sortParam, tagsParam, categoryParam, router]);
+  }, [searchQuery, category, showFeatured, showVerified, sort]);
 
   const handlePageChange = (page: number) => {
     const params = new URLSearchParams(searchParams);
@@ -177,254 +272,279 @@ function SearchContent() {
     router.push(`/search?${params.toString()}`);
   };
 
-  const handleSourceChange = (value: string) => {
-    setSource(value);
-  };
-  
-  const handleSortChange = (value: SortOption) => {
-    setSort(value);
-  };
-  
-  const handleTagToggle = (tag: string) => {
-    setTags(prev => 
-      prev.includes(tag)
-        ? prev.filter(t => t !== tag)
-        : [...prev, tag]
-    );
-  };
-  
-  const handleCategoryChange = (cat: McpServerCategory | '') => {
-    setCategory(cat);
-  };
-
-  // Render category icon dynamically
+  // Render category icon
   const renderCategoryIcon = (cat: McpServerCategory) => {
     const iconName = getCategoryIcon(cat);
     const IconComponent = (LucideIcons as Record<string, any>)[iconName];
-    
-    return IconComponent ? <IconComponent className="h-4 w-4 mr-2" /> : <Layers className="h-4 w-4 mr-2" />;
+    return IconComponent ? <IconComponent className="h-4 w-4" /> : <Layers className="h-4 w-4" />;
   };
 
-  return (
-    <div className="container-fluid h-[var(--search-content)] flex flex-col bg-background py-4 space-y-4">
-
-    <div className="flex flex-col space-y-1.5">
-        <h1 className="text-2xl font-bold tracking-tight">{t('search.title')}</h1>
-        <p className="text-muted-foreground">
-          {t('search.subtitle')}
-        </p>
-      </div>
-
-      {/* Search Controls */}
-      <div className="flex flex-wrap gap-4">
-        <div className="w-full">
-          <Input
-            type='search'
-            placeholder={t('search.input.placeholder')}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className='mb-6 h-10 max-w-xl'
-          />
-        </div>
-
-        <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4">
-          <Tabs defaultValue={source} onValueChange={handleSourceChange} className="w-full">
-            <TabsList className="w-full h-10 flex rounded-lg">
-              <TabsTrigger value={McpServerSource.COMMUNITY} className="flex-1">Community</TabsTrigger>
-              <TabsTrigger value="all" className="flex-1">All Sources</TabsTrigger>
-              <TabsTrigger value={McpServerSource.SMITHERY} className="flex-1">Smithery</TabsTrigger>
-              <TabsTrigger value={McpServerSource.NPM} className="flex-1">NPM</TabsTrigger>
-              <TabsTrigger value={McpServerSource.GITHUB} className="flex-1">GitHub</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          
-          <div className="flex space-x-2 shrink-0">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Layers className="h-4 w-4 mr-2" />
-                  {t('search.category')}
-                  {category && <span className="ml-1">({t(`search.categories.${category}`)})</span>}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>{t('search.filterByCategory')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                
-                <DropdownMenuItem 
-                  onClick={() => handleCategoryChange('')}
-                  className={!category ? 'bg-accent' : ''}
-                >
-                  {t('search.allCategories')}
-                </DropdownMenuItem>
-                
-                <DropdownMenuSeparator />
-                
-                {availableCategories.length > 0 ? (
-                  <div className="max-h-56 overflow-y-auto">
-                    {availableCategories.map(cat => (
-                      <DropdownMenuItem 
-                        key={cat}
-                        onClick={() => handleCategoryChange(cat)}
-                        className={category === cat ? 'bg-accent' : ''}
-                      >
-                        {renderCategoryIcon(cat)}
-                        {t(`search.categories.${cat}`)}
-                      </DropdownMenuItem>
-                    ))}
-                  </div>
-                ) : (
-                  <DropdownMenuItem disabled>
-                    {t('search.noCategoriesAvailable')}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <SortDesc className="h-4 w-4 mr-2" />
-                  {t('search.sort')}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>{t('search.sortBy')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem 
-                    onClick={() => handleSortChange('relevance')}
-                    className={sort === 'relevance' ? 'bg-accent' : ''}
-                  >
-                    {t('search.sortOptions.relevance')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleSortChange('popularity')}
-                    className={sort === 'popularity' ? 'bg-accent' : ''}
-                  >
-                    {t('search.sortOptions.popularity')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleSortChange('recent')}
-                    className={sort === 'recent' ? 'bg-accent' : ''}
-                  >
-                    {t('search.sortOptions.recent')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={() => handleSortChange('stars')}
-                    className={sort === 'stars' ? 'bg-accent' : ''}
-                  >
-                    {t('search.sortOptions.stars')}
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Filter className="h-4 w-4 mr-2" />
-                  {t('search.filter')}
-                  {tags.length > 0 && <span className="ml-1">({tags.length})</span>}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>{t('search.filterByTags')}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {availableTags.length > 0 ? (
-                  <div className="max-h-56 overflow-y-auto">
-                    {availableTags.map(tag => (
-                      <DropdownMenuItem 
-                        key={tag}
-                        onClick={() => handleTagToggle(tag)}
-                        className={tags.includes(tag) ? 'bg-accent' : ''}
-                      >
-                        {tag}
-                      </DropdownMenuItem>
-                    ))}
-                  </div>
-                ) : (
-                  <DropdownMenuItem disabled>
-                    {t('search.noTagsAvailable')}
-                  </DropdownMenuItem>
-                )}
-                {tags.length > 0 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setTags([])}>
-                      {t('search.clearFilters')}
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-        
-        {/* Active filters display */}
-        {(category || tags.length > 0) && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            {category && (
-              <Badge variant="secondary" className="flex items-center gap-1">
-                {renderCategoryIcon(category)}
-                {t(`search.categories.${category}`)}
-                <button
-                  className="ml-1 hover:bg-accent p-1 rounded-full"
-                  onClick={() => handleCategoryChange('')}
-                >
-                  ✕
-                </button>
-              </Badge>
-            )}
-            
-            {tags.map(tag => (
-              <Badge key={tag} variant="outline">
-                #{tag}
-                <button
-                  className="ml-1 hover:bg-accent p-1 rounded-full"
-                  onClick={() => handleTagToggle(tag)}
-                >
-                  ✕
-                </button>
-              </Badge>
+  // Loading state
+  if (isLoading && !data) {
+    return (
+      <div className="container max-w-7xl mx-auto py-8 px-4">
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-full max-w-xl" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[...Array(6)].map((_, i) => (
+              <Skeleton key={i} className="h-48" />
             ))}
-            
-            {(category || tags.length > 0) && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-6 text-xs"
-                onClick={() => {
-                  setCategory('');
-                  setTags([]);
-                }}
-              >
-                {t('search.clearAllFilters')}
-              </Button>
-            )}
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="container max-w-7xl mx-auto py-6 px-4">
+          <div className="flex flex-col space-y-4">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">{t('search.title')}</h1>
+              <p className="text-muted-foreground mt-1">
+                {t('search.subtitle')}
+              </p>
+            </div>
+            
+            {/* Search Bar */}
+            <div className="relative max-w-2xl">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder={t('search.input.placeholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 h-12 text-lg"
+              />
+            </div>
+            
+            {/* Quick Filters */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={showFeatured ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowFeatured(!showFeatured)}
+                className="gap-2"
+              >
+                <Sparkles className="h-3 w-3" />
+                Featured
+              </Button>
+              
+              <Button
+                variant={showVerified ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowVerified(!showVerified)}
+                className="gap-2"
+              >
+                <CheckCircle className="h-3 w-3" />
+                Verified
+              </Button>
+              
+              {/* Admin AI Fix Button */}
+              {isAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowBatchFix(true)}
+                  className="gap-2"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  AI Fix All
+                </Button>
+              )}
+              
+              {/* Sort Dropdown */}
+              <div className="ml-auto">
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortOption)}
+                  className="h-8 px-3 text-sm rounded-md border border-input bg-background"
+                >
+                  <option value="relevance">{t('search.sortOptions.relevance')}</option>
+                  <option value="name">{t('search.sortOptions.name')}</option>
+                  <option value="popularity">{t('search.sortOptions.popularity')}</option>
+                  <option value="recent">{t('search.sortOptions.recent')}</option>
+                  <option value="stars">{t('search.sortOptions.stars')}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {data?.results && (
-        <CardGrid
-          items={getSortedResults() || {}}
-          installedServerMap={installedServerMap}
-          currentUsername={currentUsername} // Pass the correct username
-          profileUuid={profileUuid}
-          onRefreshNeeded={() => mutate()}
-        />
-      )}
+      <div className="container max-w-7xl mx-auto py-6 px-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Sidebar - Categories */}
+          <div className="lg:col-span-1">
+            <Card className="sticky top-28">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <Layers className="h-4 w-4" />
+                    Categories
+                  </h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCategoriesOpen(!categoriesOpen)}
+                  >
+                    <ChevronDown className={cn(
+                      "h-4 w-4 transition-transform",
+                      categoriesOpen && "rotate-180"
+                    )} />
+                  </Button>
+                </div>
+                
+                <Collapsible open={categoriesOpen}>
+                  <CollapsibleContent>
+                    <div className="space-y-1">
+                      <Button
+                        variant={!category ? "secondary" : "ghost"}
+                        size="sm"
+                        className="w-full justify-start"
+                        onClick={() => setCategory('')}
+                      >
+                        All Categories
+                      </Button>
+                      
+                      {Object.entries(categorizedCategories).map(([group, cats]) => (
+                        <div key={group} className="mt-4">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                            {group}
+                          </p>
+                          {cats.map(cat => (
+                            <Button
+                              key={cat}
+                              variant={category === cat ? "secondary" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start gap-2"
+                              onClick={() => setCategory(cat)}
+                            >
+                              {renderCategoryIcon(cat)}
+                              <span className="truncate">{t(`search.categories.${cat}`)}</span>
+                              {categoryCounts[cat] && (
+                                <span className="ml-auto text-xs text-muted-foreground">
+                                  {categoryCounts[cat]}
+                                </span>
+                              )}
+                            </Button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </CardContent>
+            </Card>
+          </div>
 
-   <div className='pb-3'>
-   {data && data.total > 0 && (
-        <PaginationUi
-          currentPage={Math.floor(offset / PAGE_SIZE) + 1}
-          totalPages={Math.ceil(data.total / PAGE_SIZE)}
-          onPageChange={handlePageChange}
-        />
-      )}
-   </div>
+          {/* Main Content */}
+          <div className="lg:col-span-3">
+            {/* Active Filters */}
+            {(category || showFeatured || showVerified) && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {category && (
+                  <Badge variant="secondary" className="gap-1">
+                    {renderCategoryIcon(category)}
+                    {t(`search.categories.${category}`)}
+                    <button onClick={() => setCategory('')}>
+                      <X className="h-3 w-3 ml-1" />
+                    </button>
+                  </Badge>
+                )}
+                
+                {showFeatured && (
+                  <Badge variant="secondary" className="gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    Featured
+                    <button onClick={() => setShowFeatured(false)}>
+                      <X className="h-3 w-3 ml-1" />
+                    </button>
+                  </Badge>
+                )}
+                
+                {showVerified && (
+                  <Badge variant="secondary" className="gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    Verified
+                    <button onClick={() => setShowVerified(false)}>
+                      <X className="h-3 w-3 ml-1" />
+                    </button>
+                  </Badge>
+                )}
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setCategory('');
+                    setShowFeatured(false);
+                    setShowVerified(false);
+                  }}
+                >
+                  Clear all
+                </Button>
+              </div>
+            )}
+
+            {/* Results Count */}
+            {data && (
+              <p className="text-sm text-muted-foreground mb-4">
+                {data.total} {data.total === 1 ? 'result' : 'results'} found
+                {searchQuery && ` for "${searchQuery}"`}
+              </p>
+            )}
+
+            {/* Results Grid */}
+            {error ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <p className="text-muted-foreground">
+                    {t('search.error')}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : sortedResults && Object.keys(sortedResults).length > 0 ? (
+              <>
+                <CardGrid
+                  items={sortedResults}
+                  installedServerMap={installedServerMap}
+                  currentUsername={currentUsername}
+                  profileUuid={profileUuid}
+                  onRefreshNeeded={() => mutate()}
+                />
+                
+                {/* Pagination */}
+                {data && data.total > PAGE_SIZE && (
+                  <div className="mt-8">
+                    <PaginationUi
+                      currentPage={Math.floor(offset / PAGE_SIZE) + 1}
+                      totalPages={Math.ceil(data.total / PAGE_SIZE)}
+                      onPageChange={handlePageChange}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <p className="text-muted-foreground">
+                    {t('search.noResults')}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      {/* Batch Fix Dialog */}
+      <BatchFixDialog 
+        open={showBatchFix} 
+        onOpenChange={setShowBatchFix} 
+      />
     </div>
   );
 }
@@ -432,7 +552,14 @@ function SearchContent() {
 export default function SearchPage() {
   const { t } = useTranslation();
   return (
-    <Suspense fallback={<div>{t('search.loading')}</div>}>
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">{t('search.loading')}</p>
+        </div>
+      </div>
+    }>
       <SearchContent />
     </Suspense>
   );

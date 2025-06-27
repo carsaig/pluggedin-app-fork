@@ -1,18 +1,56 @@
 import { McpServerSource } from '@/db/schema';
 
-// MCP Server Categories
+// MCP Server Categories - synced with pluggedin-registry
 export enum McpServerCategory {
-  LLM = 'LLM',
-  UTILITY = 'Utility',
-  TOOL = 'Tool',
-  DATA = 'Data Access',
-  CONNECTOR = 'Connector',
-  SEARCH = 'Search',
+  AI = 'AI',
+  AUTOMATION = 'Automation',
+  BUSINESS = 'Business',
+  CHAT = 'Chat',
   CODE = 'Code',
+  COMMUNITY = 'Community',
+  CRYPTO = 'Crypto',
+  DATA = 'Data',
+  DATING = 'Dating',
+  DESIGN = 'Design',
+  DEVELOPER_TOOLS = 'Developer Tools',
+  EDUCATION = 'Education',
+  EMAIL = 'Email',
+  ENTERTAINMENT = 'Entertainment',
+  EVENTS = 'Events',
+  FAMILY = 'Family',
+  FILE_MANAGEMENT = 'File Management',
+  FINANCE = 'Finance',
+  FITNESS = 'Fitness',
+  FOOD = 'Food',
+  FUN = 'Fun',
+  GAMING = 'Gaming',
+  HEALTH = 'Health',
+  HOME = 'Home',
   IMAGE = 'Image',
-  AUDIO = 'Audio',
+  INTERNET_OF_THINGS = 'Internet of Things',
+  JOBS = 'Jobs',
+  LANGUAGE = 'Language',
+  LEGAL = 'Legal',
+  LIFESTYLE = 'Lifestyle',
+  MARKETING = 'Marketing',
+  MATH = 'Math',
+  MUSIC = 'Music',
+  NEWS = 'News',
+  NOTES = 'Notes',
+  PHOTOS = 'Photos',
+  PRODUCTIVITY = 'Productivity',
+  PROJECT_MANAGEMENT = 'Project Management',
+  RELIGION = 'Religion',
+  SCIENCE = 'Science',
+  SEARCH = 'Search',
+  SECURITY = 'Security',
+  SHOPPING = 'Shopping',
+  SOCIAL = 'Social',
+  SPORTS = 'Sports',
+  TRAVEL = 'Travel',
+  UTILITIES = 'Utilities',
   VIDEO = 'Video',
-  OTHER = 'Other'
+  WEATHER = 'Weather'
 }
 
 export interface McpIndex {
@@ -40,6 +78,8 @@ export interface McpIndex {
   installation_count?: number; // Number of installations
   shared_by?: string | null; // Username or name of the profile that shared the server
   shared_by_profile_url?: string | null; // URL to the profile of the user who shared the server
+  verified?: boolean; // Whether the server is verified
+  featured?: boolean; // Whether the server is featured
 }
 
 export interface SearchIndex {

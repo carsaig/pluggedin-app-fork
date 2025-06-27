@@ -1,12 +1,28 @@
 'use client';
 
-import { Database, Download, Github, MessageCircle, Package, Star, ThumbsUp, Trash2, UserPlus, Users } from 'lucide-react'; // Sorted alphabetically
+import { 
+  Database, 
+  Download, 
+  Github, 
+  MessageCircle, 
+  Package, 
+  Star, 
+  ThumbsUp, 
+  Trash2, 
+  UserPlus, 
+  Users,
+  CheckCircle,
+  Sparkles,
+  Terminal,
+  Globe,
+  AlertCircle
+} from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { unshareServer } from '@/app/actions/social'; // Import unshare action
+import { unshareServer } from '@/app/actions/social';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,15 +42,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { McpServerSource, McpServerType } from '@/db/schema';
 import { useAuth } from '@/hooks/use-auth';
-import { useToast } from '@/hooks/use-toast'; // Import useToast
+import { useToast } from '@/hooks/use-toast';
 import { McpServerCategory, SearchIndex } from '@/types/search';
 import { getCategoryIcon } from '@/utils/categories';
+import { cn } from '@/lib/utils';
 
 import { InstallDialog } from './InstallDialog';
 import { RateServerDialog } from './RateServerDialog';
-import { ReviewsDialog } from './ReviewsDialog'; // Import the new dialog
+import { ReviewsDialog } from './ReviewsDialog';
 
 // Helper function to get category badge
 function CategoryBadge({ category }: { category?: McpServerCategory }) {
@@ -55,47 +78,14 @@ function CategoryBadge({ category }: { category?: McpServerCategory }) {
   );
 }
 
-// Helper function to get source icon
-function SourceBadge({ source }: { source?: McpServerSource }) {
-  const { t: _t } = useTranslation();
-  
-  switch (source) {
-    case McpServerSource.SMITHERY:
-      return (
-        <Badge variant="outline" className="gap-1">
-          <Database className="h-3 w-3" />
-          Smithery
-        </Badge>
-      );
-    case McpServerSource.NPM:
-      return (
-        <Badge variant="outline" className="gap-1">
-          <Package className="h-3 w-3" />
-          NPM
-        </Badge>
-      );
-    case McpServerSource.GITHUB:
-      return (
-        <Badge variant="outline" className="gap-1">
-          <Github className="h-3 w-3" />
-          GitHub
-        </Badge>
-      );
-    case McpServerSource.COMMUNITY:
-      return (
-        <Badge variant="outline" className="gap-1 bg-blue-100 dark:bg-blue-900">
-          <Users className="h-3 w-3" />
-          Community
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="outline" className="gap-1">
-          <Database className="h-3 w-3" />
-          PluggedIn
-        </Badge>
-      );
+// Helper function to format large numbers
+function formatNumber(num: number): string {
+  if (num >= 1000000) {
+    return `${(num / 1000000).toFixed(1)}M`;
+  } else if (num >= 1000) {
+    return `${(num / 1000).toFixed(1)}k`;
   }
+  return num.toString();
 }
 
 export default function CardGrid({ 
@@ -103,27 +93,27 @@ export default function CardGrid({
   installedServerMap,
   currentUsername,
   onRefreshNeeded,
-  profileUuid, // Add profileUuid prop
+  profileUuid,
   selectable = false,
   selectedItems = [],
   onItemSelect,
 }: {
   items: SearchIndex;
   installedServerMap: Map<string, string>;
-  currentUsername?: string | null; // Allow null to match session type
+  currentUsername?: string | null;
   onRefreshNeeded?: () => void;
-  profileUuid?: string; // Define the prop type
+  profileUuid?: string;
   selectable?: boolean;
   selectedItems?: string[];
   onItemSelect?: (serverId: string, selected: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const { toast } = useToast(); // Initialize toast
+  const { toast } = useToast();
   const { isAuthenticated, signIn } = useAuth();
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [authDialogMessage, setAuthDialogMessage] = useState<{ key: string; defaultMsg: string } | null>(null);
 
-  // Helper function to check authentication and show a dialog if not authenticated
+  // Helper function to check authentication
   const requireAuth = (descriptionKey: string, descriptionDefault: string): boolean => {
     if (!isAuthenticated) {
       setAuthDialogMessage({ key: descriptionKey, defaultMsg: descriptionDefault });
@@ -162,18 +152,17 @@ export default function CardGrid({
   } | null>(null);
   const [reviewsDialogOpen, setReviewsDialogOpen] = useState(false);
 
-
   const handleInstallClick = (key: string, item: any) => {
     if (!requireAuth('auth:loginToInstall', 'You must be logged in to install servers.')) return;
-    // Determine if this is a stdio or SSE server
+    
     const isSSE = item.url || false;
     
     setSelectedServer({
       name: item.name,
       description: item.description,
-      command: isSSE ? '' : item.command,
-      args: isSSE ? '' : item.args?.join(' ') || '',
-      env: isSSE ? '' : item.envs?.map((env: string) => env).join('\n') || '',
+      command: isSSE ? '' : item.command || '',
+      args: isSSE ? '' : (Array.isArray(item.args) ? item.args.join(' ') : item.args || ''),
+      env: isSSE ? '' : (Array.isArray(item.envs) ? item.envs.join('\n') : item.envs || ''),
       url: isSSE ? item.url : undefined,
       type: isSSE ? McpServerType.SSE : McpServerType.STDIO,
       source: item.source,
@@ -205,67 +194,36 @@ export default function CardGrid({
     setReviewsDialogOpen(true);
   };
 
-
   // Helper to format ratings
   const formatRating = (rating?: number, count?: number) => {
-    // Use ratingCount (consistent with McpIndex type and renderCommunityInfo)
     if (rating === undefined || rating === null || !count) { 
       return null;
     }
     
-    // Convert rating to number before using toFixed
     const numericRating = typeof rating === 'string' ? parseFloat(rating) : rating;
     
-    // Check if conversion was successful and it's a valid number
     if (isNaN(numericRating)) {
       return null; 
     }
     
     return (
-      <div className="flex items-center">
-        <Star className="h-3 w-3 mr-1 fill-yellow-400 text-yellow-400" />
-        {numericRating.toFixed(1)} ({count})
-      </div>
-    );
-  };
-
-  // Shows meta data for community cards
-  const renderCommunityInfo = (item: any) => {
-    if (item.source !== McpServerSource.COMMUNITY) return null;
-    
-    // Don't show if there's no shared_by
-    if (!item.shared_by) return null;
-    
-    return (
-      <div className="text-xs text-muted-foreground mt-2 border-t pt-2">
-        {item.shared_by && (
-          <div className="flex items-center mt-1">
-            <Users className="h-3 w-3 mr-1" />
-            Shared by:{' '}
-            {item.shared_by_profile_url ? (
-              <Link 
-                href={item.shared_by_profile_url}
-                className="hover:underline ml-1"
-              >
-                {item.shared_by}
-              </Link>
-            ) : (
-              <span className="ml-1">{item.shared_by}</span>
-            )}
-          </div>
-        )}
-        {/* Make review count clickable */}
-        {item.ratingCount && item.ratingCount > 0 && (
-           <button
-             className="flex items-center mt-1 hover:underline cursor-pointer text-left"
-             onClick={() => handleReviewsClick(item)}
-             aria-label={`View ${item.ratingCount} reviews for ${item.name}`}
-           >
-            <MessageCircle className="h-3 w-3 mr-1" />
-            {item.ratingCount} {item.ratingCount === 1 ? 'review' : 'reviews'}
-          </button>
-        )}
-      </div>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button 
+              className="flex items-center hover:text-primary transition-colors"
+              onClick={() => handleReviewsClick({ rating: numericRating, ratingCount: count })}
+            >
+              <Star className="h-3 w-3 mr-1 fill-yellow-400 text-yellow-400" />
+              {numericRating.toFixed(1)}
+              <span className="text-muted-foreground ml-1">({count})</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Click to view reviews</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   };
 
@@ -279,12 +237,12 @@ export default function CardGrid({
     if (!profileUuid) {
       toast({
         title: t('common.error'),
-        description: t('search.error.profileNotFound'), // Need this translation key
+        description: t('search.error.profileNotFound'),
         variant: 'destructive',
       });
       return;
     }
-    // For community servers, external_id contains the shared server UUID
+    
     const sharedServerUuid = item.source === McpServerSource.COMMUNITY ? item.external_id : item.shared_uuid;
     if (!sharedServerUuid) {
        toast({
@@ -300,14 +258,13 @@ export default function CardGrid({
       if (result.success) {
         toast({
           title: t('common.success'),
-          description: t('search.unshareSuccess', { name: item.name }), // Need this translation key
+          description: t('search.unshareSuccess', { name: item.name }),
         });
-        // Add a small delay before refreshing to allow the search index to update
         setTimeout(() => {
-          onRefreshNeeded?.(); // Refresh the search results
+          onRefreshNeeded?.();
         }, 500);
       } else {
-        throw new Error(result.error || t('search.error.unshareFailed')); // Need this translation key
+        throw new Error(result.error || t('search.error.unshareFailed'));
       }
     } catch (error) {
       toast({
@@ -320,9 +277,8 @@ export default function CardGrid({
 
   return (
     <>
-      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
         {Object.entries(items).map(([key, item]) => {
-          // Check if the server is installed
           const installedUuid = item.source && item.external_id
             ? installedServerMap.get(`${item.source}:${item.external_id}`)
             : undefined;
@@ -334,146 +290,253 @@ export default function CardGrid({
           return (
           <Card 
             key={key} 
-            className={`flex flex-col ${selectable && !isInstalled ? 'cursor-pointer hover:border-primary' : ''} ${isSelected ? 'ring-2 ring-primary' : ''} ${isInstalled ? 'opacity-70' : ''}`}
+            className={cn(
+              "flex flex-col transition-all hover:shadow-lg",
+              selectable && !isInstalled && "cursor-pointer hover:border-primary",
+              isSelected && "ring-2 ring-primary",
+              isInstalled && "opacity-70"
+            )}
             onClick={() => {
               if (selectable && !isInstalled && onItemSelect) {
                 onItemSelect(key, !isSelected);
               }
             }}
           >
-            <CardHeader className="pb-2">
-              <div className="flex justify-between items-start">
-                <CardTitle className="mr-2">{item.name}</CardTitle>
-                <div className="flex items-center gap-2">
+            <CardHeader className="pb-3">
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-lg leading-tight flex items-center gap-2">
+                    <span className="truncate">{item.name}</span>
+                    {item.verified && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <CheckCircle className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Verified Server</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                    {item.featured && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <Sparkles className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Featured Server</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                  </CardTitle>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
                   {isInstalled && (
-                    <Badge variant="secondary" className="pointer-events-none">Installed</Badge>
+                    <Badge variant="secondary" className="text-xs">
+                      Installed
+                    </Badge>
                   )}
-                  <SourceBadge source={item.source} />
                 </div>
               </div>
-              <CardDescription>{item.description}</CardDescription>
+              <CardDescription className="line-clamp-2 mt-1">
+                {item.description}
+              </CardDescription>
             </CardHeader>
-            <CardContent className='flex-grow pb-2'>
-              {item.package_name && (
-                <p className='text-sm text-muted-foreground mb-2'>
-                  {t('search.card.package')}: {item.package_name}
-                </p>
-              )}
+            
+            <CardContent className='flex-grow space-y-3'>
+              {/* Installation info */}
               {item.command && (
-                <p className='text-sm text-muted-foreground mb-2'>
-                  {t('search.card.command')}: {item.command}
-                </p>
-              )}
-              {item.args?.length > 0 && (
-                <p className='text-sm text-muted-foreground mb-2'>
-                  {t('search.card.exampleArgs')}: {item.args.join(' ')}
-                </p>
+                <div className="bg-muted/50 rounded-md p-2 font-mono text-xs">
+                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
+                    <Terminal className="h-3 w-3" />
+                    <span>Installation</span>
+                  </div>
+                  <code className="text-primary">
+                    {item.command} {Array.isArray(item.args) ? item.args.join(' ') : item.args || ''}
+                  </code>
+                </div>
               )}
               
-              <div className="flex flex-wrap gap-2 mt-2">
+              {/* Categories and Tags */}
+              <div className="flex flex-wrap gap-1.5">
                 {item.category && (
                   <CategoryBadge category={item.category} />
                 )}
                 
-                {item.envs?.map((env: string) => (
-                  <Badge key={env} variant='secondary'>
-                    {env}
-                  </Badge>
-                ))}
+                {Array.isArray(item.envs) && item.envs.length > 0 && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Badge variant="outline" className="gap-1 text-xs">
+                          <AlertCircle className="h-3 w-3" />
+                          {item.envs.length} env {item.envs.length === 1 ? 'var' : 'vars'}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="font-semibold mb-1">Required environment variables:</p>
+                        <ul className="text-xs">
+                          {item.envs.map((env: string) => (
+                            <li key={env}>• {env}</li>
+                          ))}
+                        </ul>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
                 
-                {item.tags?.map((tag: string) => (
-                  <Badge key={tag} variant='outline'>
+                {item.tags?.slice(0, 2).map((tag: string) => (
+                  <Badge key={tag} variant='outline' className="text-xs">
                     {tag}
                   </Badge>
                 ))}
+                {item.tags && item.tags.length > 2 && (
+                  <Badge variant='outline' className="text-xs">
+                    +{item.tags.length - 2}
+                  </Badge>
+                )}
               </div>
               
-              <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
-                {item.useCount !== undefined && (
-                  <div className="flex items-center">
-                    <Database className="h-3 w-3 mr-1" />
-                    {t('search.card.usageCount')}: {item.useCount}
-                  </div>
-                )}
+              {/* Stats */}
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                {formatRating(item.rating, item.ratingCount)}
                 
-            {formatRating(item.rating, item.ratingCount)}
+                {item.installation_count !== undefined && item.installation_count > 0 && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger className="flex items-center gap-1">
+                        <UserPlus className="h-3 w-3" />
+                        {formatNumber(item.installation_count)}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{item.installation_count} installations</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
 
-            {/* Display Installation Count */}
-            {item.installation_count !== undefined && item.installation_count > 0 && (
-              <div className="flex items-center">
-                <UserPlus className="h-3 w-3 mr-1" />
-                {item.installation_count}
-              </div>
-            )}
-
-            {item.github_stars !== undefined && item.github_stars !== null && (
-                  <div className="flex items-center">
-                    <Github className="h-3 w-3 mr-1" />
-                    {item.github_stars}
-                  </div>
+                {item.github_stars !== undefined && item.github_stars !== null && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger className="flex items-center gap-1">
+                        <Star className="h-3 w-3" />
+                        {formatNumber(item.github_stars)}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{item.github_stars} GitHub stars</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
                 
                 {item.package_download_count !== undefined && item.package_download_count !== null && (
-                  <div className="flex items-center">
-                    <Download className="h-3 w-3 mr-1" />
-                    {item.package_download_count}
-                  </div>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger className="flex items-center gap-1">
+                        <Download className="h-3 w-3" />
+                        {formatNumber(item.package_download_count)}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{item.package_download_count} downloads</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
               </div>
 
-              {/* Add community-specific information */}
-              {renderCommunityInfo(item)}
+              {/* Community info */}
+              {item.source === McpServerSource.COMMUNITY && item.shared_by && (
+                <div className="text-xs text-muted-foreground pt-2 border-t">
+                  <div className="flex items-center gap-1">
+                    <Users className="h-3 w-3" />
+                    Shared by{' '}
+                    {item.shared_by_profile_url ? (
+                      <Link 
+                        href={item.shared_by_profile_url}
+                        className="hover:underline text-primary"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {item.shared_by}
+                      </Link>
+                    ) : (
+                      <span>{item.shared_by}</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </CardContent>
-            <CardFooter className='flex justify-between pt-2'>
+            
+            <CardFooter className='pt-3 pb-4 gap-2'>
               {item.githubUrl && (
-                <Button variant='outline' asChild size="sm">
+                <Button 
+                  variant='outline' 
+                  size="sm" 
+                  asChild 
+                  className="flex-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Link
                     href={item.githubUrl}
                     target='_blank'
-                    rel='noopener noreferrer'>
-                    <Github className='w-4 h-4 mr-2' />
-                    GitHub
+                    rel='noopener noreferrer'
+                  >
+                    <Github className='w-4 h-4' />
+                    <span className="ml-2">View</span>
                   </Link>
                 </Button>
               )}
               
-              {/* Only show rate button if not user's own server */}
-              {item.source && item.external_id && !isOwned && (
+              {!isOwned && (
                 <Button 
                   variant='outline' 
                   size="sm"
-                  className="gap-1"
-                  onClick={() => handleRateClick(key, item)}
+                  className="flex-1"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRateClick(key, item);
+                  }}
                 >
                   <ThumbsUp className='w-4 h-4' />
-                  {t('search.card.rate')}
+                  <span className="ml-2">Rate</span>
                 </Button>
               )}
               
               {isOwned ? (
-                // Show Unshare button for owned servers
                 <Button
                   variant='destructive'
                   size="sm"
-                  onClick={() => handleUnshareClick(item)}
+                  className="flex-1"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUnshareClick(item);
+                  }}
                 >
-                  <Trash2 className='w-4 h-4 mr-2' />
-                  Unshare
+                  <Trash2 className='w-4 h-4' />
+                  <span className="ml-2">Unshare</span>
                 </Button>
-              ) : isInstalled ? ( // Check if installed first
-                // Render disabled "Installed" button if installed
-                <Button variant='outline' size="sm" disabled className="pointer-events-none">
-                  {t('search.card.installed')}
+              ) : isInstalled ? (
+                <Button 
+                  variant='secondary' 
+                  size="sm" 
+                  disabled 
+                  className="flex-1"
+                >
+                  Installed
                 </Button>
-              ) : ( 
-                // If not owned AND not installed, render Install button
+              ) : (
                 <Button
                   variant='default'
                   size="sm"
-                  onClick={() => handleInstallClick(key, item)}
+                  className="flex-1"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleInstallClick(key, item);
+                  }}
                 >
-                  <Download className='w-4 h-4 mr-2' />
-                  {t('search.card.install')}
+                  <Download className='w-4 h-4' />
+                  <span className="ml-2">Install</span>
                 </Button>
               )}
             </CardFooter>
@@ -499,7 +562,6 @@ export default function CardGrid({
         />
       )}
 
-      {/* Render the Reviews Dialog */}
       {reviewServer && (
         <ReviewsDialog
           open={reviewsDialogOpen}
