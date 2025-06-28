@@ -1,11 +1,11 @@
 import { useCallback, useMemo } from 'react';
 
-import type { McpIndex, McpServerCategory } from '@/types/search';
+import type { McpIndex } from '@/types/search';
 
 export interface FilterState {
   filter: {
     tags: string[];
-    category: McpServerCategory | '';
+    category: string;
     hasTags: boolean;
     hasCategory: boolean;
     isFiltered: boolean;
@@ -16,7 +16,7 @@ export interface FilterState {
 export const useFilteredResults = (
   data: Record<string, McpIndex> | undefined,
   tags: string[],
-  category: McpServerCategory | ''
+  category: string
 ): FilterState => {
   // Create filter state information
   const filter = useMemo(() => ({

@@ -1,4 +1,14 @@
-import { McpServerCategory } from '@/types/search';
+/**
+ * Dynamic categories will be fetched from the API
+ */
+export let mcpServerCategories: string[] = [];
+
+/**
+ * Set the available categories (called after fetching from API)
+ */
+export function setCategories(categories: string[]) {
+  mcpServerCategories = categories;
+}
 
 /**
  * Get the icon name for a category (for use with Lucide icons)
@@ -6,107 +16,43 @@ import { McpServerCategory } from '@/types/search';
  * @param category - The category to get an icon for
  * @returns Icon name from Lucide icons
  */
-export function getCategoryIcon(category: McpServerCategory): string {
-  switch (category) {
-    case McpServerCategory.AI:
-      return 'Brain';
-    case McpServerCategory.AUTOMATION:
-      return 'Zap';
-    case McpServerCategory.BUSINESS:
-      return 'Briefcase';
-    case McpServerCategory.CHAT:
-      return 'MessageSquare';
-    case McpServerCategory.CODE:
-      return 'Code';
-    case McpServerCategory.COMMUNITY:
-      return 'Users';
-    case McpServerCategory.CRYPTO:
-      return 'Bitcoin';
-    case McpServerCategory.DATA:
-      return 'Database';
-    case McpServerCategory.DATING:
-      return 'Heart';
-    case McpServerCategory.DESIGN:
-      return 'Palette';
-    case McpServerCategory.DEVELOPER_TOOLS:
-      return 'Wrench';
-    case McpServerCategory.EDUCATION:
-      return 'GraduationCap';
-    case McpServerCategory.EMAIL:
-      return 'Mail';
-    case McpServerCategory.ENTERTAINMENT:
-      return 'Gamepad2';
-    case McpServerCategory.EVENTS:
-      return 'Calendar';
-    case McpServerCategory.FAMILY:
-      return 'Users2';
-    case McpServerCategory.FILE_MANAGEMENT:
-      return 'FolderOpen';
-    case McpServerCategory.FINANCE:
-      return 'DollarSign';
-    case McpServerCategory.FITNESS:
-      return 'Activity';
-    case McpServerCategory.FOOD:
-      return 'UtensilsCrossed';
-    case McpServerCategory.FUN:
-      return 'Smile';
-    case McpServerCategory.GAMING:
-      return 'Gamepad';
-    case McpServerCategory.HEALTH:
-      return 'HeartPulse';
-    case McpServerCategory.HOME:
-      return 'Home';
-    case McpServerCategory.IMAGE:
-      return 'Image';
-    case McpServerCategory.INTERNET_OF_THINGS:
-      return 'Cpu';
-    case McpServerCategory.JOBS:
-      return 'Briefcase';
-    case McpServerCategory.LANGUAGE:
-      return 'Languages';
-    case McpServerCategory.LEGAL:
-      return 'Scale';
-    case McpServerCategory.LIFESTYLE:
-      return 'Coffee';
-    case McpServerCategory.MARKETING:
-      return 'TrendingUp';
-    case McpServerCategory.MATH:
-      return 'Calculator';
-    case McpServerCategory.MUSIC:
-      return 'Music';
-    case McpServerCategory.NEWS:
-      return 'Newspaper';
-    case McpServerCategory.NOTES:
-      return 'NotebookPen';
-    case McpServerCategory.PHOTOS:
-      return 'Camera';
-    case McpServerCategory.PRODUCTIVITY:
-      return 'CheckSquare';
-    case McpServerCategory.PROJECT_MANAGEMENT:
-      return 'KanbanSquare';
-    case McpServerCategory.RELIGION:
-      return 'BookOpen';
-    case McpServerCategory.SCIENCE:
-      return 'Microscope';
-    case McpServerCategory.SEARCH:
-      return 'Search';
-    case McpServerCategory.SECURITY:
-      return 'Shield';
-    case McpServerCategory.SHOPPING:
-      return 'ShoppingCart';
-    case McpServerCategory.SOCIAL:
-      return 'Share2';
-    case McpServerCategory.SPORTS:
-      return 'Trophy';
-    case McpServerCategory.TRAVEL:
-      return 'Plane';
-    case McpServerCategory.UTILITIES:
-      return 'Tool';
-    case McpServerCategory.VIDEO:
-      return 'Video';
-    case McpServerCategory.WEATHER:
-      return 'Cloud';
-    default:
-      return 'CircleDot';
-  }
+export function getCategoryIcon(category: string): string {
+  // Map category names to icons
+  const categoryLower = category.toLowerCase();
+  
+  if (categoryLower.includes('ai') || categoryLower.includes('llm')) return 'Brain';
+  if (categoryLower.includes('aggregator')) return 'Layers';
+  if (categoryLower.includes('art') || categoryLower.includes('culture')) return 'Palette';
+  if (categoryLower.includes('browser') || categoryLower.includes('automation')) return 'Globe';
+  if (categoryLower.includes('cloud')) return 'Cloud';
+  if (categoryLower.includes('code') || categoryLower.includes('execution')) return 'Code';
+  if (categoryLower.includes('coding') || categoryLower.includes('agent')) return 'Bot';
+  if (categoryLower.includes('command') || categoryLower.includes('line')) return 'Terminal';
+  if (categoryLower.includes('communication') || categoryLower.includes('chat')) return 'MessageSquare';
+  if (categoryLower.includes('customer')) return 'UserCheck';
+  if (categoryLower.includes('database') || categoryLower.includes('data')) return 'Database';
+  if (categoryLower.includes('deliver')) return 'Package';
+  if (categoryLower.includes('developer') || categoryLower.includes('tool')) return 'Wrench';
+  if (categoryLower.includes('embedded')) return 'Cpu';
+  if (categoryLower.includes('file')) return 'FolderOpen';
+  if (categoryLower.includes('finance') || categoryLower.includes('fintech')) return 'DollarSign';
+  if (categoryLower.includes('gaming') || categoryLower.includes('game')) return 'Gamepad';
+  if (categoryLower.includes('knowledge') || categoryLower.includes('memory')) return 'BookOpen';
+  if (categoryLower.includes('location')) return 'MapPin';
+  if (categoryLower.includes('marketing')) return 'TrendingUp';
+  if (categoryLower.includes('monitor')) return 'Activity';
+  if (categoryLower.includes('multimedia')) return 'Film';
+  if (categoryLower.includes('search') || categoryLower.includes('extraction')) return 'Search';
+  if (categoryLower.includes('security')) return 'Shield';
+  if (categoryLower.includes('social')) return 'Share2';
+  if (categoryLower.includes('sport')) return 'Trophy';
+  if (categoryLower.includes('support') || categoryLower.includes('service')) return 'HelpCircle';
+  if (categoryLower.includes('translation')) return 'Languages';
+  if (categoryLower.includes('text-to-speech') || categoryLower.includes('speech')) return 'Mic';
+  if (categoryLower.includes('travel') || categoryLower.includes('transport')) return 'Plane';
+  if (categoryLower.includes('version') || categoryLower.includes('control')) return 'GitBranch';
+  if (categoryLower.includes('other') || categoryLower.includes('misc')) return 'Grid3x3';
+  
+  // Default icon
+  return 'CircleDot';
 }

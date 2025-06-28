@@ -14,6 +14,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +35,7 @@ import { useRegistryCategories } from '@/hooks/use-registry-categories';
 import { useIsAdmin } from '@/hooks/use-is-admin';
 import { useCategoryCounts } from '@/hooks/use-category-counts';
 import { McpServer } from '@/types/mcp-server';
-import { McpIndex, McpServerCategory, PaginatedSearchResult } from '@/types/search';
+import { McpIndex, PaginatedSearchResult } from '@/types/search';
 import { getCategoryIcon } from '@/utils/categories';
 import { cn } from '@/lib/utils';
 
@@ -62,9 +63,7 @@ function SearchContent() {
   // State
   const [searchQuery, setSearchQuery] = useState(query);
   const [sort, setSort] = useState<SortOption>(sortParam);
-  const [category, setCategory] = useState<McpServerCategory | ''>(
-    categoryParam as McpServerCategory || ''
-  );
+  const [category, setCategory] = useState<string>(categoryParam);
   const [showFeatured, setShowFeatured] = useState(featuredParam);
   const [showVerified, setShowVerified] = useState(verifiedParam);
   const [categoriesOpen, setCategoriesOpen] = useState(true);
@@ -89,21 +88,10 @@ function SearchContent() {
   const { categories: registryCategories } = useRegistryCategories();
   const { counts: categoryCounts } = useCategoryCounts();
   
-  // Group categories by theme
-  const categorizedCategories = useMemo(() => {
-    const groups: Record<string, McpServerCategory[]> = {
-      'Development': ['Code', 'Developer Tools', 'Design', 'Data', 'File Management'],
-      'Communication': ['Chat', 'Email', 'Social', 'News'],
-      'Productivity': ['Productivity', 'Project Management', 'Notes', 'Automation'],
-      'Business': ['Business', 'Finance', 'Marketing', 'Jobs', 'Legal'],
-      'Entertainment': ['Entertainment', 'Gaming', 'Music', 'Video', 'Photos'],
-      'Learning': ['Education', 'Language', 'Science', 'Math'],
-      'Lifestyle': ['Health', 'Fitness', 'Food', 'Travel', 'Shopping', 'Home'],
-      'Other': ['AI', 'Crypto', 'Internet of Things', 'Security', 'Search', 'Utilities', 'Weather']
-    };
-    
-    return groups;
-  }, []);
+  // Sort categories alphabetically
+  const sortedCategories = useMemo(() => {
+    return (registryCategories || []).sort((a, b) => a.localeCompare(b));
+  }, [registryCategories]);
 
   // Fetch installed servers
   const { data: installedServersData } = useSWR(
@@ -273,7 +261,7 @@ function SearchContent() {
   };
 
   // Render category icon
-  const renderCategoryIcon = (cat: McpServerCategory) => {
+  const renderCategoryIcon = (cat: string) => {
     const iconName = getCategoryIcon(cat);
     const IconComponent = (LucideIcons as Record<string, any>)[iconName];
     return IconComponent ? <IconComponent className="h-4 w-4" /> : <Layers className="h-4 w-4" />;
@@ -302,10 +290,15 @@ function SearchContent() {
         <div className="container max-w-7xl mx-auto py-6 px-4">
           <div className="flex flex-col space-y-4">
             <div>
+              <div className="flex items-center justify-between">
               <h1 className="text-3xl font-bold tracking-tight">{t('search.title')}</h1>
-              <p className="text-muted-foreground mt-1">
-                {t('search.subtitle')}
-              </p>
+              <Link href="/submit-server">
+                <Button variant="outline">Submit a Server</Button>
+              </Link>
+            </div>
+            <p className="text-muted-foreground mt-1">
+              {t('search.subtitle')}
+            </p>
             </div>
             
             {/* Search Bar */}
@@ -409,29 +402,22 @@ function SearchContent() {
                         All Categories
                       </Button>
                       
-                      {Object.entries(categorizedCategories).map(([group, cats]) => (
-                        <div key={group} className="mt-4">
-                          <p className="text-xs font-medium text-muted-foreground mb-2">
-                            {group}
-                          </p>
-                          {cats.map(cat => (
-                            <Button
-                              key={cat}
-                              variant={category === cat ? "secondary" : "ghost"}
-                              size="sm"
-                              className="w-full justify-start gap-2"
-                              onClick={() => setCategory(cat)}
-                            >
-                              {renderCategoryIcon(cat)}
-                              <span className="truncate">{t(`search.categories.${cat}`)}</span>
-                              {categoryCounts[cat] && (
-                                <span className="ml-auto text-xs text-muted-foreground">
-                                  {categoryCounts[cat]}
-                                </span>
-                              )}
-                            </Button>
-                          ))}
-                        </div>
+                      {sortedCategories.map(cat => (
+                        <Button
+                          key={cat}
+                          variant={category === cat ? "secondary" : "ghost"}
+                          size="sm"
+                          className="w-full justify-start gap-2 mb-1"
+                          onClick={() => setCategory(cat)}
+                        >
+                          {renderCategoryIcon(cat)}
+                          <span className="truncate">{cat}</span>
+                          {categoryCounts[cat] && (
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {categoryCounts[cat]}
+                            </span>
+                          )}
+                        </Button>
                       ))}
                     </div>
                   </CollapsibleContent>
@@ -448,7 +434,7 @@ function SearchContent() {
                 {category && (
                   <Badge variant="secondary" className="gap-1">
                     {renderCategoryIcon(category)}
-                    {t(`search.categories.${category}`)}
+                    {category}
                     <button onClick={() => setCategory('')}>
                       <X className="h-3 w-3 ml-1" />
                     </button>

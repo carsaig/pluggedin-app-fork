@@ -1,38 +1,30 @@
 'use client';
 
-import { 
-  Database, 
-  Download, 
-  Github, 
-  MessageCircle, 
-  Package, 
-  Star, 
-  ThumbsUp, 
-  Trash2, 
-  UserPlus, 
-  Users,
-  CheckCircle,
-  Sparkles,
-  Terminal,
-  Globe,
-  AlertCircle
-} from 'lucide-react';
-import * as LucideIcons from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
-import { unshareServer } from '@/app/actions/social';
+import { 
+  AlertCircle,
+  Check,
+  CheckCircle,
+  Download,
+  ExternalLink,
+  Github,
+  Globe,
+  Package,
+  Shield,
+  Sparkles,
+  Star,
+  Terminal,
+  ThumbsUp,
+  Trash,
+  UserPlus,
+  Users
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -42,54 +34,52 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useToast } from '@/components/ui/use-toast';
 import { McpServerSource, McpServerType } from '@/db/schema';
 import { useAuth } from '@/hooks/use-auth';
-import { useToast } from '@/hooks/use-toast';
-import { McpServerCategory, SearchIndex } from '@/types/search';
-import { getCategoryIcon } from '@/utils/categories';
 import { cn } from '@/lib/utils';
-
 import { InstallDialog } from './InstallDialog';
+import { AuthRequiredDialog } from './AuthRequiredDialog';
 import { RateServerDialog } from './RateServerDialog';
 import { ReviewsDialog } from './ReviewsDialog';
 
-// Helper function to get category badge
-function CategoryBadge({ category }: { category?: McpServerCategory }) {
-  const { t } = useTranslation();
-  
-  if (!category) {
+function ServerTypeBadge({ serverType }: { serverType?: 'STDIO' | 'Streamable HTTP' | 'SSE' | 'HTTP' }) {
+  if (!serverType) {
     return null;
   }
-  
-  const iconName = getCategoryIcon(category);
-  const IconComponent = (LucideIcons as Record<string, any>)[iconName];
-  
+
+  const isHttp = serverType === 'Streamable HTTP' || serverType === 'HTTP' || serverType === 'SSE';
+  const icon = isHttp ? <Globe className="h-3 w-3" /> : <Terminal className="h-3 w-3" />;
+  const text = isHttp ? 'HTTP' : 'STDIO';
+
   return (
-    <Badge variant="secondary" className="gap-1">
-      {IconComponent && <IconComponent className="h-3 w-3" />}
-      {t(`search.categories.${category}`)}
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger>
+          <Badge variant="outline" className="gap-1">
+            {icon}
+            {text}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{serverType} Server</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function CategoryBadge({ category }: { category: string }) {
+  return (
+    <Badge variant="secondary" className="text-xs">
+      {category}
     </Badge>
   );
 }
 
-// Helper function to format large numbers
-function formatNumber(num: number): string {
-  if (num >= 1000000) {
-    return `${(num / 1000000).toFixed(1)}M`;
-  } else if (num >= 1000) {
-    return `${(num / 1000).toFixed(1)}k`;
-  }
-  return num.toString();
-}
-
-export default function CardGrid({ 
-  items, 
+export default function CardGrid({
+  items,
   installedServerMap,
   currentUsername,
   onRefreshNeeded,
@@ -164,7 +154,7 @@ export default function CardGrid({
       args: isSSE ? '' : (Array.isArray(item.args) ? item.args.join(' ') : item.args || ''),
       env: isSSE ? '' : (Array.isArray(item.envs) ? item.envs.join('\n') : item.envs || ''),
       url: isSSE ? item.url : undefined,
-      type: isSSE ? McpServerType.SSE : McpServerType.STDIO,
+      type: item.serverType || (isSSE ? McpServerType.SSE : McpServerType.STDIO),
       source: item.source,
       external_id: item.external_id,
     });
@@ -196,21 +186,21 @@ export default function CardGrid({
 
   // Helper to format ratings
   const formatRating = (rating?: number, count?: number) => {
-    if (rating === undefined || rating === null || !count) { 
+    if (rating === undefined || rating === null || !count) {
       return null;
     }
     
     const numericRating = typeof rating === 'string' ? parseFloat(rating) : rating;
     
     if (isNaN(numericRating)) {
-      return null; 
+      return null;
     }
     
     return (
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button 
+            <button
               className="flex items-center hover:text-primary transition-colors"
               onClick={() => handleReviewsClick({ rating: numericRating, ratingCount: count })}
             >
@@ -288,8 +278,8 @@ export default function CardGrid({
           const isInstalled = Boolean(installedUuid);
 
           return (
-          <Card 
-            key={key} 
+          <Card
+            key={key}
             className={cn(
               "flex flex-col transition-all hover:shadow-lg",
               selectable && !isInstalled && "cursor-pointer hover:border-primary",
@@ -351,7 +341,7 @@ export default function CardGrid({
               {item.command && (
                 <div className="bg-muted/50 rounded-md p-2 font-mono text-xs">
                   <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Terminal className="h-3 w-3" />
+                    <ServerTypeBadge serverType={item.serverType} />
                     <span>Installation</span>
                   </div>
                   <code className="text-primary">
@@ -453,7 +443,7 @@ export default function CardGrid({
                     <Users className="h-3 w-3" />
                     Shared by{' '}
                     {item.shared_by_profile_url ? (
-                      <Link 
+                      <Link
                         href={item.shared_by_profile_url}
                         className="hover:underline text-primary"
                         onClick={(e) => e.stopPropagation()}
@@ -483,7 +473,7 @@ export default function CardGrid({
                     rel='noopener noreferrer'
                   >
                     <Github className='w-4 h-4' />
-                    <span className="ml-2">View</span>
+                    <span className="ml-2">View on GitHub</span>
                   </Link>
                 </Button>
               )}

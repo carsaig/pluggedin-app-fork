@@ -1,58 +1,5 @@
 import { McpServerSource } from '@/db/schema';
 
-// MCP Server Categories - synced with pluggedin-registry
-export enum McpServerCategory {
-  AI = 'AI',
-  AUTOMATION = 'Automation',
-  BUSINESS = 'Business',
-  CHAT = 'Chat',
-  CODE = 'Code',
-  COMMUNITY = 'Community',
-  CRYPTO = 'Crypto',
-  DATA = 'Data',
-  DATING = 'Dating',
-  DESIGN = 'Design',
-  DEVELOPER_TOOLS = 'Developer Tools',
-  EDUCATION = 'Education',
-  EMAIL = 'Email',
-  ENTERTAINMENT = 'Entertainment',
-  EVENTS = 'Events',
-  FAMILY = 'Family',
-  FILE_MANAGEMENT = 'File Management',
-  FINANCE = 'Finance',
-  FITNESS = 'Fitness',
-  FOOD = 'Food',
-  FUN = 'Fun',
-  GAMING = 'Gaming',
-  HEALTH = 'Health',
-  HOME = 'Home',
-  IMAGE = 'Image',
-  INTERNET_OF_THINGS = 'Internet of Things',
-  JOBS = 'Jobs',
-  LANGUAGE = 'Language',
-  LEGAL = 'Legal',
-  LIFESTYLE = 'Lifestyle',
-  MARKETING = 'Marketing',
-  MATH = 'Math',
-  MUSIC = 'Music',
-  NEWS = 'News',
-  NOTES = 'Notes',
-  PHOTOS = 'Photos',
-  PRODUCTIVITY = 'Productivity',
-  PROJECT_MANAGEMENT = 'Project Management',
-  RELIGION = 'Religion',
-  SCIENCE = 'Science',
-  SEARCH = 'Search',
-  SECURITY = 'Security',
-  SHOPPING = 'Shopping',
-  SOCIAL = 'Social',
-  SPORTS = 'Sports',
-  TRAVEL = 'Travel',
-  UTILITIES = 'Utilities',
-  VIDEO = 'Video',
-  WEATHER = 'Weather'
-}
-
 export interface McpIndex {
   name: string;
   description: string;
@@ -69,7 +16,7 @@ export interface McpIndex {
   qualifiedName?: string; // For Smithery servers
   useCount?: number; // For usage metrics
   isDeployed?: boolean; // For Smithery deployment status
-  category?: McpServerCategory; // For categorization
+  category?: string; // For categorization
   tags?: string[]; // For tagging
   updated_at?: string; // Last update timestamp
   url?: string | null; // URL for SSE servers
@@ -80,6 +27,7 @@ export interface McpIndex {
   shared_by_profile_url?: string | null; // URL to the profile of the user who shared the server
   verified?: boolean; // Whether the server is verified
   featured?: boolean; // Whether the server is featured
+  serverType?: 'STDIO' | 'Streamable HTTP' | 'SSE' | 'HTTP';
 }
 
 export interface SearchIndex {
