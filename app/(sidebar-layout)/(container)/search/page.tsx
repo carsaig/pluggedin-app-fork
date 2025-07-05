@@ -105,12 +105,13 @@ function SearchContent() {
     });
     
     if (source !== 'all') params.set('source', source);
+    if (sort !== 'relevance') params.set('sort', sort);
     if (packageRegistry) params.set('packageRegistry', packageRegistry);
     if (repositorySource) params.set('repositorySource', repositorySource);
     if (latestOnly) params.set('latest', 'true');
     
     return `/api/service/search?${params.toString()}`;
-  }, [query, source, pageSize, offset, packageRegistry, repositorySource, latestOnly]);
+  }, [query, source, sort, pageSize, offset, packageRegistry, repositorySource, latestOnly]);
 
   const { data, mutate } = useSWR(
     apiUrl,

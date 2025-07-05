@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, BarChart3, Code2, ExternalLink, GitBranch, Globe, Info, Loader2, MessageSquare, Package, Server, Star, Trash2, Users } from 'lucide-react';
+import { AlertCircle, BarChart3, Code2, ExternalLink, GitBranch, Globe, Info, Loader2, MessageSquare, Package, Server, Star, Trash2, UserCheck, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -42,6 +42,17 @@ interface ServerDetailDialogProps {
     rating?: number;
     ratingCount?: number;
     installation_count?: number;
+    // Additional fields
+    shared_by?: string;
+    tags?: string[];
+    category?: string;
+    github_stars?: number;
+    package_download_count?: number;
+    package_name?: string;
+    package_registry?: string;
+    // Claim information
+    is_claimed?: boolean;
+    claimed_at?: string;
     // Registry-specific fields
     registryData?: {
       id: string;
@@ -375,8 +386,136 @@ export function ServerDetailDialog({
                     <p className="text-sm text-muted-foreground">Source</p>
                     <p className="font-medium">{server.source || 'Local'}</p>
                   </div>
+                  {server.category && (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Category</p>
+                      <p className="font-medium">{server.category}</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
+
+              {/* Community Server Information */}
+              {server.source === McpServerSource.COMMUNITY && (server.shared_by || server.is_claimed) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Community Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {server.shared_by && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Shared by</p>
+                        <p className="font-medium">{server.shared_by}</p>
+                      </div>
+                    )}
+                    {server.is_claimed && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Claim Status</p>
+                        <div className="flex items-center gap-2">
+                          <UserCheck className="h-4 w-4 text-green-600" />
+                          <span className="font-medium">Claimed</span>
+                          {server.claimed_at && (
+                            <span className="text-sm text-muted-foreground">
+                              on {new Date(server.claimed_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Package Information */}
+              {(server.package_name || server.package_registry || server.package_download_count !== undefined) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Package className="h-5 w-5" />
+                      Package Information
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {server.package_name && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Package Name</p>
+                        <p className="font-medium font-mono">{server.package_name}</p>
+                      </div>
+                    )}
+                    {server.package_registry && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Registry</p>
+                        <p className="font-medium">{server.package_registry.toUpperCase()}</p>
+                      </div>
+                    )}
+                    {server.package_download_count !== undefined && server.package_download_count !== null && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Downloads</p>
+                        <p className="font-medium">{formatNumber(server.package_download_count)}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Tags */}
+              {server.tags && server.tags.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Tags</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-2">
+                      {server.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Statistics */}
+              {(server.rating !== undefined || server.installation_count !== undefined || server.github_stars !== undefined) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5" />
+                      Statistics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {server.rating !== undefined && server.ratingCount !== undefined && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Rating</p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                            <span className="font-medium">{server.rating.toFixed(1)}</span>
+                          </div>
+                          <span className="text-sm text-muted-foreground">({server.ratingCount} reviews)</span>
+                        </div>
+                      </div>
+                    )}
+                    {server.installation_count !== undefined && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">Installations</p>
+                        <p className="font-medium">{formatNumber(server.installation_count)}</p>
+                      </div>
+                    )}
+                    {server.github_stars !== undefined && server.github_stars !== null && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">GitHub Stars</p>
+                        <p className="font-medium">{formatNumber(server.github_stars)}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </TabsContent>
 
             <TabsContent value="configuration" className="space-y-4">
@@ -465,10 +604,11 @@ export function ServerDetailDialog({
 
             <TabsContent value="reviews" className="space-y-4">
               {/* Reviews section */}
-              {server.source === McpServerSource.REGISTRY && server.external_id ? (
+              {(server.source === McpServerSource.REGISTRY && server.external_id) || 
+               (server.source === McpServerSource.COMMUNITY) ? (
                 <ServerReviewsList 
-                  serverId={server.external_id}
-                  source={server.source}
+                  serverId={server.external_id || server.name}
+                  source={server.source || McpServerSource.MANUAL}
                   currentUserId={session?.user?.id}
                 />
               ) : (
@@ -477,7 +617,7 @@ export function ServerDetailDialog({
                     <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-semibold mb-2">{t('reviews.notAvailable', 'Reviews not available')}</h3>
                     <p className="text-sm text-muted-foreground">
-                      {t('reviews.registryOnly', 'Reviews are only available for registry servers')}
+                      {t('reviews.registryOnly', 'Reviews are only available for registry and community servers')}
                     </p>
                   </CardContent>
                 </Card>

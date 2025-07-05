@@ -1,10 +1,9 @@
-import { addDays } from 'date-fns';
 import { and, desc, eq, ilike, or } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getServerRatingMetrics } from '@/app/actions/mcp-server-metrics';
 import { db } from '@/db';
-import { McpServerSource, profilesTable, projectsTable, searchCacheTable, sharedMcpServersTable, users } from '@/db/schema';
+import { McpServerSource, profilesTable, projectsTable, sharedMcpServersTable, users } from '@/db/schema';
 import { registryVPClient } from '@/lib/registry/pluggedin-registry-vp-client';
 import { transformPluggedinRegistryToMcpIndex } from '@/lib/registry/registry-transformer';
 import type { PaginatedSearchResult, SearchIndex } from '@/types/search';
@@ -44,6 +43,7 @@ export async function GET(request: NextRequest) {
   const source = (url.searchParams.get('source') as McpServerSource) || null;
   const offset = parseInt(url.searchParams.get('offset') || '0');
   const pageSize = parseInt(url.searchParams.get('pageSize') || '10');
+  const sort = url.searchParams.get('sort') as 'relevance' | 'popularity' | 'recent' | 'stars' | null;
   
   // New filter parameters for VP API
   const packageRegistry = url.searchParams.get('packageRegistry') as 'npm' | 'docker' | 'pypi' | null;
@@ -58,14 +58,14 @@ export async function GET(request: NextRequest) {
     if (source) {
       // Handle community source (keep existing functionality)
       if (source === McpServerSource.COMMUNITY) {
-        results = await searchCommunity(query, true); // Pass flag to exclude claimed servers
+        results = await searchCommunity(query, true, sort); // Pass flag to exclude claimed servers and sort option
         const paginated = paginateResults(results, offset, pageSize);
         return NextResponse.json(paginated);
       }
 
       // Handle registry source - stats already included from VP API
       if (source === McpServerSource.REGISTRY) {
-        results = await searchRegistry(query, { packageRegistry, repositorySource, latestOnly, version });
+        results = await searchRegistry(query, { packageRegistry, repositorySource, latestOnly, version }, sort);
         const paginated = paginateResults(results, offset, pageSize);
         return NextResponse.json(paginated);
       }
@@ -108,13 +108,18 @@ export async function GET(request: NextRequest) {
     
     if (registryEnabled) {
       // Get registry results - these already include stats from VP API
-      const registryResults = await searchRegistry(query, { packageRegistry, repositorySource, latestOnly, version });
+      const registryResults = await searchRegistry(query, { packageRegistry, repositorySource, latestOnly, version }, sort);
       Object.assign(results, registryResults);
     }
     
     // Always include community results - these need local metrics enrichment
-    const communityResults = await searchCommunity(query, false); // Include claimed servers when showing all
+    const communityResults = await searchCommunity(query, false, sort); // Include claimed servers when showing all
     Object.assign(results, communityResults);
+    
+    // Apply sorting to combined results if specified and not relevance
+    if (sort && sort !== 'relevance') {
+      results = sortResults(results, sort);
+    }
     
     // Paginate and return results
     const paginatedResults = paginateResults(results, offset, pageSize);
@@ -139,8 +144,8 @@ interface RegistryFilters {
 /**
  * Search for MCP servers in the Plugged.in Registry using VP API
  */
-async function searchRegistry(query: string, filters: RegistryFilters = {}): Promise<SearchIndex> {
-  console.log('searchRegistry called with query:', query, 'filters:', filters);
+async function searchRegistry(query: string, filters: RegistryFilters = {}, sort?: string | null): Promise<SearchIndex> {
+  console.log('searchRegistry called with query:', query, 'filters:', filters, 'sort:', sort);
   try {
     // Use VP API to get servers with stats included
     const servers = await registryVPClient.searchServersWithStats(query, McpServerSource.REGISTRY);
@@ -174,6 +179,11 @@ async function searchRegistry(query: string, filters: RegistryFilters = {}): Pro
     
     console.log(`[Search API] Found ${Object.keys(indexed).length} servers with stats`);
     
+    // Apply sorting if specified (since VP API doesn't support sort yet)
+    if (sort && sort !== 'relevance') {
+      return sortResults(indexed, sort);
+    }
+    
     // Return results - no need to enrich with metrics as stats are already included
     return indexed;
     
@@ -183,6 +193,53 @@ async function searchRegistry(query: string, filters: RegistryFilters = {}): Pro
   }
 }
 
+
+/**
+ * Sort search results based on the specified sort option
+ */
+function sortResults(results: SearchIndex, sort: string): SearchIndex {
+  const entries = Object.entries(results);
+  let sortedEntries: [string, McpIndex][];
+  
+  switch (sort) {
+    case 'popularity':
+      sortedEntries = entries.sort((a, b) => {
+        const aCount = a[1].installation_count || 0;
+        const bCount = b[1].installation_count || 0;
+        return bCount - aCount;
+      });
+      break;
+      
+    case 'recent':
+      sortedEntries = entries.sort((a, b) => {
+        // Use updated_at for sorting recent items
+        const aDate = a[1].updated_at ? new Date(a[1].updated_at).getTime() : 0;
+        const bDate = b[1].updated_at ? new Date(b[1].updated_at).getTime() : 0;
+        return bDate - aDate;
+      });
+      break;
+      
+    case 'stars':
+      sortedEntries = entries.sort((a, b) => {
+        const aRating = a[1].rating || 0;
+        const bRating = b[1].rating || 0;
+        // Sort by rating first, then by rating count as a tiebreaker
+        if (aRating !== bRating) {
+          return bRating - aRating;
+        }
+        const aCount = a[1].ratingCount || 0;
+        const bCount = b[1].ratingCount || 0;
+        return bCount - aCount;
+      });
+      break;
+      
+    default:
+      // Default to original order (relevance)
+      sortedEntries = entries;
+  }
+  
+  return Object.fromEntries(sortedEntries);
+}
 
 /**
  * Enrich search results with rating and installation metrics
@@ -360,9 +417,10 @@ async function searchGitHub(query: string): Promise<SearchIndex> {
  * 
  * @param query Search query
  * @param excludeClaimed Whether to exclude servers that have been claimed
+ * @param sort Sort option
  * @returns SearchIndex of results
  */
-async function searchCommunity(query: string, excludeClaimed: boolean = true): Promise<SearchIndex> {
+async function searchCommunity(query: string, excludeClaimed: boolean = true, sort?: string | null): Promise<SearchIndex> {
   try {
     // Get shared MCP servers, joining through profiles and projects to get user info
     const sharedServersQuery = db
@@ -394,16 +452,30 @@ async function searchCommunity(query: string, excludeClaimed: boolean = true): P
         }
         
         return and(...conditions);
-      })())
-      .orderBy(desc(sharedMcpServersTable.created_at))
-      .limit(50); // Limit to 50 results
+      })());
+
+    // Apply sorting based on sort parameter
+    if (sort === 'recent') {
+      sharedServersQuery.orderBy(desc(sharedMcpServersTable.created_at));
+    } else if (sort === 'popularity') {
+      // For now, order by created_at until we have install count in the query
+      sharedServersQuery.orderBy(desc(sharedMcpServersTable.created_at));
+    } else if (sort === 'stars') {
+      // For now, order by created_at until we have rating in the query
+      sharedServersQuery.orderBy(desc(sharedMcpServersTable.created_at));
+    } else {
+      // Default: relevance (order by created_at for consistency)
+      sharedServersQuery.orderBy(desc(sharedMcpServersTable.created_at));
+    }
+    
+    sharedServersQuery.limit(50); // Limit to 50 results
 
     const resultsWithJoins = await sharedServersQuery;
 
     // Convert to our SearchIndex format
     const results: SearchIndex = {};
 
-    for (const { sharedServer, profile, user } of resultsWithJoins) {
+    for (const { sharedServer, user } of resultsWithJoins) {
       // We'll use the template field which contains the sanitized MCP server data
       const template = sharedServer.template as Record<string, any>;
 
@@ -470,6 +542,11 @@ async function searchCommunity(query: string, excludeClaimed: boolean = true): P
 
     console.log(`Found ${Object.keys(results).length} community servers`);
     
+    // Apply sorting if specified and not relevance
+    if (sort && sort !== 'relevance') {
+      return sortResults(results, sort);
+    }
+    
     return results; // Return directly as metrics are fetched inside
   } catch (error) {
     console.error('Community search error:', error);
@@ -502,23 +579,6 @@ async function checkCache(source: McpServerSource, query: string): Promise<Searc
   return null;
 }
 
-/**
- * Cache search results
- * 
- * @param source Source of results
- * @param query Search query
- * @param results Search results
- */
-async function cacheResults(source: McpServerSource, query: string, results: SearchIndex): Promise<void> {
-  const ttl = CACHE_TTL[source] || 60; // Default to 1 hour if source not found
-  
-  await db.insert(searchCacheTable).values({
-    source,
-    query,
-    results,
-    expires_at: addDays(new Date(), ttl / (24 * 60)), // Convert minutes to days
-  });
-}
 
 /**
  * Paginate search results

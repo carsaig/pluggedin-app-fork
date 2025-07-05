@@ -22,6 +22,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { SearchIndex } from '@/types/search';
 
+import { ClaimServerDialog } from './ClaimServerDialog';
 import { InstallDialog } from './InstallDialog';
 import { RateServerDialog } from './RateServerDialog';
 import { ReviewsDialog } from './ReviewsDialog';
@@ -145,6 +146,14 @@ export default function CardGrid({
   // State for detail dialog
   const [detailServer, setDetailServer] = useState<any | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  
+  // State for claim dialog
+  const [claimServer, setClaimServer] = useState<{
+    uuid: string;
+    name: string;
+    template?: any;
+  } | null>(null);
+  const [claimDialogOpen, setClaimDialogOpen] = useState(false);
 
 
 
@@ -223,6 +232,19 @@ export default function CardGrid({
     setReviewsDialogOpen(true);
   };
 
+  // Handle clicking the claim button
+  const handleClaimClick = (key: string, item: any) => {
+    if (!requireAuth('auth:loginToClaim', 'You must be logged in to claim servers.')) return;
+    
+    // For community servers, external_id is the server UUID
+    setClaimServer({
+      uuid: item.external_id || key,
+      name: item.name,
+      template: item
+    });
+    setClaimDialogOpen(true);
+  };
+  
   // Handle clicking the view details button
   const handleViewDetailsClick = (e: React.MouseEvent, item: any) => {
     e.stopPropagation(); // Prevent card click
@@ -263,6 +285,11 @@ export default function CardGrid({
       shared_by: item.shared_by,
       tags: item.tags,
       category: item.category,
+      package_name: item.package_name,
+      package_registry: item.package_registry,
+      is_claimed: item.is_claimed,
+      claimed_at: item.claimed_at,
+      repositoryUrl: item.githubUrl,
     });
     setDetailDialogOpen(true);
   };
@@ -353,6 +380,7 @@ export default function CardGrid({
               onUnshareClick={handleUnshareClick}
               onItemSelect={onItemSelect}
               onReviewsClick={handleReviewsClick}
+              onClaimClick={handleClaimClick}
             />
           );
         })}
@@ -391,6 +419,15 @@ export default function CardGrid({
           onOpenChange={setDetailDialogOpen}
           server={detailServer}
           canDelete={false}
+        />
+      )}
+      
+      {/* Claim Server Dialog */}
+      {claimServer && (
+        <ClaimServerDialog
+          open={claimDialogOpen}
+          onOpenChange={setClaimDialogOpen}
+          server={claimServer}
         />
       )}
 

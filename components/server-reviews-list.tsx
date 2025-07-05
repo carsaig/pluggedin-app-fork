@@ -5,6 +5,7 @@ import { MessageSquare, Star, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getReviewsForServer } from '@/app/actions/reviews';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,6 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { McpServerSource } from '@/db/schema';
 import { FeedbackItem, FeedbackResponse, registryVPClient } from '@/lib/registry/pluggedin-registry-vp-client';
+import { ServerReview } from '@/types/review';
 
 interface ServerReviewsListProps {
   serverId: string;
@@ -37,6 +39,7 @@ export function ServerReviewsList({ serverId, source, currentUserId }: ServerRev
 
   useEffect(() => {
     loadFeedback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId, sort]);
 
   const loadFeedback = async (loadMore = false) => {
@@ -44,23 +47,80 @@ export function ServerReviewsList({ serverId, source, currentUserId }: ServerRev
     
     setIsLoading(!loadMore);
     try {
-      const response: FeedbackResponse = await registryVPClient.getFeedback(
-        serverId,
-        limit,
-        loadMore ? offset : 0,
-        sort
-      );
-      
-      if (loadMore) {
-        setFeedback(prev => [...prev, ...response.feedback]);
+      // Use different APIs based on the source
+      if (source === McpServerSource.REGISTRY) {
+        // Registry servers use the VP client
+        const response: FeedbackResponse = await registryVPClient.getFeedback(
+          serverId,
+          limit,
+          loadMore ? offset : 0,
+          sort
+        );
+        
+        if (loadMore) {
+          setFeedback(prev => [...prev, ...response.feedback]);
+        } else {
+          setFeedback(response.feedback);
+          setOffset(0);
+        }
+        
+        setTotalCount(response.total_count);
+        setHasMore(response.has_more);
+        setOffset(prev => prev + response.feedback.length);
       } else {
-        setFeedback(response.feedback);
-        setOffset(0);
+        // Community and other servers use the general review system
+        const reviews: ServerReview[] = await getReviewsForServer(
+          source || McpServerSource.COMMUNITY,
+          serverId
+        );
+        
+        // Convert ServerReview to FeedbackItem format
+        const feedbackItems: FeedbackItem[] = reviews.map(review => ({
+          id: review.uuid,
+          server_id: review.server_external_id,
+          user_id: review.user_id,
+          username: review.user?.username || 'Anonymous',
+          user_avatar: review.user?.avatar_url || review.user?.image || undefined,
+          rating: review.rating || 0,
+          comment: review.comment || '',
+          created_at: review.created_at.toISOString(),
+          updated_at: review.updated_at.toISOString(),
+          is_verified: false,
+          helpful_count: 0,
+        }));
+        
+        // Apply sorting
+        const sortedItems = [...feedbackItems].sort((a, b) => {
+          switch (sort) {
+            case 'oldest':
+              return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+            case 'newest':
+              return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            case 'rating_high':
+              return b.rating - a.rating;
+            case 'rating_low':
+              return a.rating - b.rating;
+            default:
+              return 0;
+          }
+        });
+        
+        // Handle pagination locally
+        const startIndex = loadMore ? offset : 0;
+        const endIndex = startIndex + limit;
+        const paginatedItems = sortedItems.slice(startIndex, endIndex);
+        
+        if (loadMore) {
+          setFeedback(prev => [...prev, ...paginatedItems]);
+        } else {
+          setFeedback(paginatedItems);
+          setOffset(0);
+        }
+        
+        setTotalCount(feedbackItems.length);
+        setHasMore(endIndex < feedbackItems.length);
+        setOffset(endIndex);
       }
-      
-      setTotalCount(response.total_count);
-      setHasMore(response.has_more);
-      setOffset(prev => prev + response.feedback.length);
     } catch (error) {
       console.error('Failed to load feedback:', error);
     } finally {
