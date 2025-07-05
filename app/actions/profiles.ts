@@ -9,6 +9,24 @@ import { type Locale } from '@/i18n/config';
 import { getAuthSession } from '@/lib/auth';
 import { Profile } from '@/types/profile';
 
+// Type definition for joined Profile and User data
+export interface ProfileWithUser {
+  // Profile fields
+  uuid: string;
+  name: string;
+  project_uuid: string;
+  created_at: Date;
+  language: string | null;
+  enabled_capabilities: unknown | null;
+  // User fields
+  userId: string;
+  username: string;
+  userEmail: string;
+  userBio: string | null;
+  userAvatarUrl: string | null;
+  userIsPublic: boolean;
+}
+
 export async function createProfile(currentProjectUuid: string, name: string) {
   const session = await getAuthSession();
   
@@ -100,7 +118,7 @@ export async function getProfiles(currentProjectUuid: string) {
   return profiles;
 }
 
-export async function getProjectActiveProfile(currentProjectUuid: string) {
+export async function getProjectActiveProfile(currentProjectUuid: string): Promise<ProfileWithUser | null> {
   const session = await getAuthSession();
   
   if (!session) {
@@ -155,8 +173,7 @@ export async function getProjectActiveProfile(currentProjectUuid: string) {
       .limit(1);
 
     if (activeProfileData.length > 0) {
-      // TODO: Define a proper return type combining Profile and User fields
-      return activeProfileData[0]; // Removed 'as any' cast
+      return activeProfileData[0] as ProfileWithUser;
     }
   }
 
@@ -175,8 +192,7 @@ export async function getProjectActiveProfile(currentProjectUuid: string) {
       .set({ active_profile_uuid: profilesData[0].uuid })
       .where(eq(projectsTable.uuid, currentProjectUuid));
 
-    // TODO: Define a proper return type combining Profile and User fields
-    return profilesData[0]; // Removed 'as any' cast
+    return profilesData[0] as ProfileWithUser;
   }
 
   // If no profiles exist, create a default one
@@ -210,8 +226,7 @@ export async function getProjectActiveProfile(currentProjectUuid: string) {
     throw new Error('Failed to fetch newly created default profile');
   }
 
-  // TODO: Define a proper return type combining Profile and User fields
-  return defaultProfileData[0]; // Removed 'as any' cast
+  return defaultProfileData[0] as ProfileWithUser;
 }
 
 export async function setProfileActive(

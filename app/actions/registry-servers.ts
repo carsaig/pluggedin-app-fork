@@ -113,6 +113,75 @@ export async function checkGitHubConnection(registryToken?: string) {
 }
 
 /**
+ * Fetch metadata from GitHub repository
+ */
+async function fetchGitHubMetadata(githubToken: string, repoUrl: string) {
+  if (!repoUrl) {
+    throw new Error('Repository URL is required');
+  }
+
+  // Extract owner and repo from URL
+  const match = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+  if (!match) {
+    throw new Error('Invalid GitHub repository URL');
+  }
+
+  const [, owner, repo] = match;
+
+  try {
+    // Fetch repository info
+    const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: {
+        'Authorization': `token ${githubToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    if (!repoResponse.ok) {
+      throw new Error(`Failed to fetch repository: ${repoResponse.statusText}`);
+    }
+
+    const repoData = await repoResponse.json();
+
+    // Try to fetch package.json
+    let packageData: any = null;
+    try {
+      const packageResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/package.json`, {
+        headers: {
+          'Authorization': `token ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      });
+
+      if (packageResponse.ok) {
+        const fileData = await packageResponse.json();
+        const content = Buffer.from(fileData.content, 'base64').toString('utf-8');
+        packageData = JSON.parse(content);
+      }
+    } catch (e) {
+      // package.json might not exist, that's ok
+    }
+
+    // Construct metadata
+    const metadata = {
+      name: packageData?.name || repoData.name,
+      description: packageData?.description || repoData.description,
+      version: packageData?.version || '0.0.0',
+      homepage: packageData?.homepage || repoData.homepage || repoData.html_url,
+      repository: packageData?.repository || repoData.html_url,
+      license: packageData?.license || repoData.license?.spdx_id || repoData.license?.name,
+      author: packageData?.author || repoData.owner.login,
+      keywords: packageData?.keywords || repoData.topics || [],
+    };
+
+    return metadata;
+  } catch (error) {
+    console.error('Error fetching GitHub metadata:', error);
+    throw error;
+  }
+}
+
+/**
  * Verify GitHub ownership using registry OAuth token
  */
 export async function verifyGitHubOwnership(registryToken: string, repoUrl: string) {
@@ -472,10 +541,30 @@ export async function claimServer(serverUuid: string) {
     }
 
     // Auto-approve if GitHub ownership matches
-    // TODO: Fetch latest metadata from GitHub
+    // Fetch latest metadata from GitHub
+    try {
+      const metadata = await fetchGitHubMetadata(githubToken, server.repository_url);
+      
+      // Update server with latest metadata
+      await db.update(registryServersTable)
+        .set({
+          description: metadata.description || server.description,
+          version: metadata.version || server.version,
+          homepage: metadata.homepage || server.homepage,
+          repository: metadata.repository || server.repository,
+          license: metadata.license || server.license,
+          author: metadata.author || server.author,
+          updated_at: new Date(),
+        })
+        .where(eq(registryServersTable.uuid, serverUuid));
+    } catch (metadataError) {
+      console.error('Failed to fetch GitHub metadata:', metadataError);
+      // Continue with claim even if metadata fetch fails
+    }
+    
     // TODO: Publish to registry
     
-    // For now, just mark as claimed
+    // Mark as claimed
     const [updated] = await db.update(registryServersTable)
       .set({
         is_claimed: true,

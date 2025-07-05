@@ -2,10 +2,23 @@ import { and, eq } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { db } from '@/db';
-import { mcpServersTable, profilesTable, ToggleStatus, toolsTable } from '@/db/schema';
+import { 
+  mcpServersTable, 
+  profilesTable, 
+  ToggleStatus, 
+  toolsTable,
+  resourceTemplatesTable,
+  resourcesTable,
+  promptsTable
+} from '@/db/schema';
 import { getAuthSession } from '@/lib/auth';
 import { decryptServerData } from '@/lib/encryption';
-import { listToolsFromServer } from '@/lib/mcp/client-wrapper';
+import { 
+  listToolsFromServer,
+  listResourceTemplatesFromServer,
+  listResourcesFromServer,
+  listPromptsFromServer
+} from '@/lib/mcp/client-wrapper';
 
 interface StreamMessage {
   type: 'log' | 'progress' | 'error' | 'complete';
@@ -144,9 +157,9 @@ export async function GET(
 
         // Discovery phase indicators
         let discoveredTools: any[] = [];
-        const discoveredTemplates: any[] = [];
-        const discoveredResources: any[] = [];
-        const discoveredPrompts: any[] = [];
+        let discoveredTemplates: any[] = [];
+        let discoveredResources: any[] = [];
+        let discoveredPrompts: any[] = [];
 
         // Discover Tools
         sendMessage({
@@ -204,8 +217,175 @@ export async function GET(
           });
         }
 
-        // TODO: Add similar streaming for resource templates, static resources, and prompts
-        // For now, we'll just complete the tools discovery
+        // Discover Resource Templates
+        sendMessage({
+          type: 'progress',
+          message: 'Discovering resource templates...',
+          timestamp: Date.now(),
+        });
+
+        try {
+          discoveredTemplates = await listResourceTemplatesFromServer(decryptedServerConfig);
+          sendMessage({
+            type: 'log',
+            message: `Discovered ${discoveredTemplates.length} resource templates`,
+            timestamp: Date.now(),
+          });
+
+          if (discoveredTemplates.length > 0) {
+            // Delete existing resource templates
+            sendMessage({
+              type: 'log',
+              message: `Deleting old resource templates for server: ${serverUuid}`,
+              timestamp: Date.now(),
+            });
+            
+            await db.delete(resourceTemplatesTable).where(eq(resourceTemplatesTable.mcp_server_uuid, serverUuid));
+
+            // Insert new resource templates
+            sendMessage({
+              type: 'log',
+              message: `Inserting ${discoveredTemplates.length} new resource templates...`,
+              timestamp: Date.now(),
+            });
+
+            const templatesToInsert = discoveredTemplates.map(template => ({
+              mcp_server_uuid: serverUuid,
+              uri_template: template.uriTemplate,
+              name: template.name,
+              description: template.description,
+              mime_type: template.mimeType,
+              status: ToggleStatus.ACTIVE,
+            }));
+            
+            await db.insert(resourceTemplatesTable).values(templatesToInsert);
+            
+            sendMessage({
+              type: 'log',
+              message: `Successfully stored ${discoveredTemplates.length} resource templates`,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (error: any) {
+          sendMessage({
+            type: 'error',
+            message: `Failed to discover/store resource templates: ${error.message}`,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Discover Static Resources
+        sendMessage({
+          type: 'progress',
+          message: 'Discovering static resources...',
+          timestamp: Date.now(),
+        });
+
+        try {
+          discoveredResources = await listResourcesFromServer(decryptedServerConfig);
+          sendMessage({
+            type: 'log',
+            message: `Discovered ${discoveredResources.length} static resources`,
+            timestamp: Date.now(),
+          });
+
+          if (discoveredResources.length > 0) {
+            // Delete existing static resources
+            sendMessage({
+              type: 'log',
+              message: `Deleting old static resources for server: ${serverUuid}`,
+              timestamp: Date.now(),
+            });
+            
+            await db.delete(resourcesTable).where(eq(resourcesTable.mcp_server_uuid, serverUuid));
+
+            // Insert new static resources
+            sendMessage({
+              type: 'log',
+              message: `Inserting ${discoveredResources.length} new static resources...`,
+              timestamp: Date.now(),
+            });
+
+            const resourcesToInsert = discoveredResources.map(resource => ({
+              mcp_server_uuid: serverUuid,
+              uri: resource.uri,
+              name: resource.name,
+              description: resource.description,
+              mime_type: resource.mimeType,
+              status: ToggleStatus.ACTIVE,
+            }));
+            
+            await db.insert(resourcesTable).values(resourcesToInsert);
+            
+            sendMessage({
+              type: 'log',
+              message: `Successfully stored ${discoveredResources.length} static resources`,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (error: any) {
+          sendMessage({
+            type: 'error',
+            message: `Failed to discover/store static resources: ${error.message}`,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Discover Prompts
+        sendMessage({
+          type: 'progress',
+          message: 'Discovering prompts...',
+          timestamp: Date.now(),
+        });
+
+        try {
+          discoveredPrompts = await listPromptsFromServer(decryptedServerConfig);
+          sendMessage({
+            type: 'log',
+            message: `Discovered ${discoveredPrompts.length} prompts`,
+            timestamp: Date.now(),
+          });
+
+          if (discoveredPrompts.length > 0) {
+            // Delete existing prompts
+            sendMessage({
+              type: 'log',
+              message: `Deleting old prompts for server: ${serverUuid}`,
+              timestamp: Date.now(),
+            });
+            
+            await db.delete(promptsTable).where(eq(promptsTable.mcp_server_uuid, serverUuid));
+
+            // Insert new prompts
+            sendMessage({
+              type: 'log',
+              message: `Inserting ${discoveredPrompts.length} new prompts...`,
+              timestamp: Date.now(),
+            });
+
+            const promptsToInsert = discoveredPrompts.map(prompt => ({
+              mcp_server_uuid: serverUuid,
+              name: prompt.name,
+              description: prompt.description,
+              arguments: prompt.arguments,
+              status: ToggleStatus.ACTIVE,
+            }));
+            
+            await db.insert(promptsTable).values(promptsToInsert);
+            
+            sendMessage({
+              type: 'log',
+              message: `Successfully stored ${discoveredPrompts.length} prompts`,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (error: any) {
+          sendMessage({
+            type: 'error',
+            message: `Failed to discover/store prompts: ${error.message}`,
+            timestamp: Date.now(),
+          });
+        }
 
         sendMessage({
           type: 'complete',
@@ -232,10 +412,19 @@ export async function GET(
           timestamp: Date.now(),
         });
       } finally {
-        // Close the stream after a short delay to ensure all messages are sent
+        // Send a final keep-alive message before closing
+        setTimeout(() => {
+          sendMessage({
+            type: 'log',
+            message: 'Discovery stream will close in 2 seconds...',
+            timestamp: Date.now(),
+          });
+        }, 3000);
+        
+        // Close the stream after a longer delay to ensure all messages are sent and client has time to process
         setTimeout(() => {
           close();
-        }, 100);
+        }, 5000); // 5 seconds delay
       }
     })();
 

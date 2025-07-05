@@ -5,6 +5,9 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
+// App version - should match package.json
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || '2.6.2';
+
 import { createCommunityServer } from '@/app/actions/community-servers';
 import {
   fetchRegistryServer,
@@ -963,12 +966,12 @@ export function IntelligentServerDialog({
           name: `io.github.${owner}/${repo}`,
           description: config.description || '',
           version_detail: {
-            version: "1.0.0" // TODO: Extract from package.json or config
+            version: APP_VERSION
           },
           packages: [{
             registry_name: 'npm',
             name: config.args?.[0] || `@${owner}/${repo}`,
-            version: "1.0.0",
+            version: APP_VERSION,
             environment_variables: Object.keys(config.env || {}).map(name => ({
               name,
               description: `Environment variable ${name}`

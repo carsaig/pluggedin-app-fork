@@ -4,8 +4,6 @@ import { formatDistanceToNow } from 'date-fns';
 import { Star, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { getReviewsForServer } from '@/app/actions/reviews'; // Assuming this action exists
-// Removed unused Badge import
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Dialog,
@@ -16,7 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { McpServerSource } from '@/db/schema';
-import { ServerReview } from '@/types/review'; // Assuming this type exists
+import { FeedbackItem, registryVPClient } from '@/lib/registry/pluggedin-registry-vp-client';
 
 interface ReviewsDialogProps {
   open: boolean;
@@ -29,13 +27,13 @@ interface ReviewsDialogProps {
 }
 
 export function ReviewsDialog({ open, onOpenChange, serverData }: ReviewsDialogProps) {
-  const [reviews, setReviews] = useState<ServerReview[]>([]);
+  const [reviews, setReviews] = useState<FeedbackItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchReviews() {
-      if (!open || !serverData?.source || !serverData?.external_id) {
+      if (!open || !serverData?.external_id) {
         setReviews([]);
         setError(null);
         return;
@@ -44,11 +42,13 @@ export function ReviewsDialog({ open, onOpenChange, serverData }: ReviewsDialogP
       setIsLoading(true);
       setError(null);
       try {
-        const fetchedReviews = await getReviewsForServer(
-          serverData.source,
-          serverData.external_id
+        const response = await registryVPClient.getFeedback(
+          serverData.external_id,
+          100, // Get more reviews for the dialog
+          0,
+          'newest'
         );
-        setReviews(fetchedReviews);
+        setReviews(response.feedback);
       } catch (err) {
         console.error('Failed to fetch reviews:', err);
         setError('Failed to load reviews. Please try again later.');
@@ -100,17 +100,17 @@ export function ReviewsDialog({ open, onOpenChange, serverData }: ReviewsDialogP
             <p className="text-destructive text-center">{error}</p>
           ) : reviews.length > 0 ? (
             reviews.map((review) => (
-              <div key={review.uuid} className="space-y-2 border-b pb-4 last:border-b-0">
+              <div key={review.id} className="space-y-2 border-b pb-4 last:border-b-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={review.user?.avatar_url || review.user?.image || ''} />
+                      <AvatarImage src={review.user_avatar || ''} />
                       <AvatarFallback>
-                        {review.user?.name?.[0] || review.user?.username?.[0] || <User className="h-4 w-4" />}
+                        {review.username?.[0] || <User className="h-4 w-4" />}
                       </AvatarFallback>
                     </Avatar>
                     <span className="font-medium text-sm">
-                      {review.user?.name || review.user?.username || 'Anonymous'}
+                      {review.username || 'Anonymous'}
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">

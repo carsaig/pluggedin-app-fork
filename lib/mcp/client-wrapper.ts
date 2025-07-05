@@ -901,11 +901,11 @@ export async function listResourceTemplatesFromServer(serverConfig: McpServer): 
     // Check capabilities *after* connecting
     const capabilities = connectedClient.client.getServerCapabilities();
     if (!capabilities?.resources) {
-        // console.log(`[MCP Wrapper] Server ${serverIdentifier} does not advertise resource support (needed for templates).`); // Removed console log
-        return []; // Return empty list if resources are not supported
+        console.log(`[MCP Wrapper] Server ${serverIdentifier} does not advertise resource support (needed for templates), but trying anyway...`);
+        // Don't return empty - try anyway in case the server supports it but doesn't advertise
     }
 
-    // Server claims to support resources, attempt the request
+    // Attempt the request regardless of advertised capabilities
     const result = await connectedClient.client.request(
             { method: 'resources/templates/list', params: {} },
             ListResourceTemplatesResultSchema
@@ -998,16 +998,22 @@ export async function listPromptsFromServer(serverConfig: McpServer): Promise<Pr
 
         // Check capabilities *after* connecting
         const capabilities = connectedClient.client.getServerCapabilities();
+        console.log(`[MCP Wrapper] Server ${serverIdentifier} capabilities:`, JSON.stringify(capabilities, null, 2));
+        
         if (!capabilities?.prompts) {
-            // console.log(`[MCP Wrapper] Server ${serverIdentifier} does not advertise prompt support.`);
-            return []; // Return empty list if prompts are not supported
+            console.log(`[MCP Wrapper] Server ${serverIdentifier} does not advertise prompt support, but trying anyway...`);
+            // Don't return empty - try anyway in case the server supports it but doesn't advertise
         }
 
-        // Server claims to support prompts, attempt the request
+        // Attempt the request regardless of advertised capabilities
         const result = await connectedClient.client.request(
             { method: 'prompts/list', params: {} },
             ListPromptsResultSchema // Use the correct schema
         );
+        
+        // Debug logging to understand the response
+        console.log(`[MCP Wrapper] Prompts list response for ${serverIdentifier}:`, JSON.stringify(result, null, 2));
+        
         return Array.isArray(result?.prompts) ? result.prompts : [];
     } catch (error: any) {
         // Specifically handle "Method not found" for prompts list as non-critical
@@ -1024,4 +1030,206 @@ export async function listPromptsFromServer(serverConfig: McpServer): Promise<Pr
 }
 
 
-// TODO: Add functions for callTool, readResource, getPrompt etc. as needed, reusing create/connect logic.
+/**
+ * Calls a tool on the MCP server and returns the result.
+ * @param serverConfig Configuration of the MCP server.
+ * @param toolName Name of the tool to call.
+ * @param toolArguments Arguments to pass to the tool.
+ * @returns A promise resolving to the tool result or throwing an error.
+ */
+export async function callTool(
+    serverConfig: McpServer, 
+    toolName: string, 
+    toolArguments: Record<string, unknown> = {}
+): Promise<unknown> {
+    // Validate inputs
+    if (!serverConfig) {
+        throw new Error('Server configuration is required');
+    }
+    if (!toolName) {
+        throw new Error('Tool name is required');
+    }
+    
+    const serverIdentifier = serverConfig.name || serverConfig.uuid || 'unknown';
+    const clientData = await createMcpClientAndTransport(serverConfig);
+    if (!clientData) {
+        throw new Error(`Failed to create client/transport for server ${serverIdentifier}`);
+    }
+
+    let connectedClient: ConnectedMcpClient | undefined;
+    try {
+        connectedClient = await connectMcpClient(
+            clientData.client, 
+            clientData.transport, 
+            serverIdentifier, 
+            serverConfig, 
+            3, 
+            1000, 
+            true
+        );
+
+        // Check if server supports tools
+        const capabilities = connectedClient.client.getServerCapabilities();
+        if (!capabilities?.tools) {
+            throw new Error(`Server ${serverIdentifier} does not support tools`);
+        }
+
+        // Call the tool
+        const result = await connectedClient.client.request({
+            method: 'tools/call',
+            params: {
+                name: toolName,
+                arguments: toolArguments
+            }
+        });
+
+        return result;
+    } catch (error: any) {
+        console.error(`[MCP Wrapper] Error calling tool ${toolName} on ${serverIdentifier}:`, error);
+        throw error;
+    } finally {
+        await safeCleanup(connectedClient, serverConfig);
+    }
+}
+
+/**
+ * Reads a resource from the MCP server.
+ * @param serverConfig Configuration of the MCP server.
+ * @param resourceUri URI of the resource to read.
+ * @returns A promise resolving to the resource content or throwing an error.
+ */
+export async function readResource(
+    serverConfig: McpServer, 
+    resourceUri: string
+): Promise<{
+    contents: Array<{
+        uri: string;
+        mimeType?: string;
+        text?: string;
+        blob?: string;
+    }>;
+}> {
+    // Validate inputs
+    if (!serverConfig) {
+        throw new Error('Server configuration is required');
+    }
+    if (!resourceUri) {
+        throw new Error('Resource URI is required');
+    }
+    
+    const serverIdentifier = serverConfig.name || serverConfig.uuid || 'unknown';
+    const clientData = await createMcpClientAndTransport(serverConfig);
+    if (!clientData) {
+        throw new Error(`Failed to create client/transport for server ${serverIdentifier}`);
+    }
+
+    let connectedClient: ConnectedMcpClient | undefined;
+    try {
+        connectedClient = await connectMcpClient(
+            clientData.client, 
+            clientData.transport, 
+            serverIdentifier, 
+            serverConfig, 
+            3, 
+            1000, 
+            true
+        );
+
+        // Check if server supports resources
+        const capabilities = connectedClient.client.getServerCapabilities();
+        if (!capabilities?.resources) {
+            throw new Error(`Server ${serverIdentifier} does not support resources`);
+        }
+
+        // Read the resource
+        const result = await connectedClient.client.request({
+            method: 'resources/read',
+            params: {
+                uri: resourceUri
+            }
+        });
+
+        return result as any;
+    } catch (error: any) {
+        console.error(`[MCP Wrapper] Error reading resource ${resourceUri} from ${serverIdentifier}:`, error);
+        throw error;
+    } finally {
+        await safeCleanup(connectedClient, serverConfig);
+    }
+}
+
+/**
+ * Gets a prompt from the MCP server.
+ * @param serverConfig Configuration of the MCP server.
+ * @param promptName Name of the prompt to retrieve.
+ * @param promptArguments Arguments to pass to the prompt.
+ * @returns A promise resolving to the prompt result or throwing an error.
+ */
+export async function getPrompt(
+    serverConfig: McpServer, 
+    promptName: string, 
+    promptArguments: Record<string, unknown> = {}
+): Promise<{
+    messages: Array<{
+        role: 'user' | 'assistant' | 'system';
+        content: {
+            type: 'text' | 'image' | 'resource';
+            text?: string;
+            data?: string;
+            mimeType?: string;
+            resource?: {
+                uri: string;
+                mimeType?: string;
+            };
+        };
+    }>;
+}> {
+    // Validate inputs
+    if (!serverConfig) {
+        throw new Error('Server configuration is required');
+    }
+    if (!promptName) {
+        throw new Error('Prompt name is required');
+    }
+    
+    const serverIdentifier = serverConfig.name || serverConfig.uuid || 'unknown';
+    const clientData = await createMcpClientAndTransport(serverConfig);
+    if (!clientData) {
+        throw new Error(`Failed to create client/transport for server ${serverIdentifier}`);
+    }
+
+    let connectedClient: ConnectedMcpClient | undefined;
+    try {
+        connectedClient = await connectMcpClient(
+            clientData.client, 
+            clientData.transport, 
+            serverIdentifier, 
+            serverConfig, 
+            3, 
+            1000, 
+            true
+        );
+
+        // Check if server supports prompts
+        const capabilities = connectedClient.client.getServerCapabilities();
+        if (!capabilities?.prompts) {
+            throw new Error(`Server ${serverIdentifier} does not support prompts`);
+        }
+
+        // Get the prompt
+        const result = await connectedClient.client.request({
+            method: 'prompts/get',
+            params: {
+                name: promptName,
+                arguments: promptArguments
+            }
+        });
+
+        return result as any;
+    } catch (error: any) {
+        console.error(`[MCP Wrapper] Error getting prompt ${promptName} from ${serverIdentifier}:`, error);
+        throw error;
+    } finally {
+        await safeCleanup(connectedClient, serverConfig);
+    }
+}

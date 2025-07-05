@@ -240,7 +240,6 @@ export default function SidebarLayout({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                   
-                  {/* TODO: Add custom MCP servers to the sidebar */}
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild tooltip={t('notifications.title')} className="group-data-[collapsible=icon]:justify-center">
                       <Link href='/notifications'>
@@ -267,6 +266,20 @@ export default function SidebarLayout({
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem> */}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            
+            {/* Custom MCP Servers Section */}
+            <SidebarGroup>
+              <SidebarGroupLabel className="flex items-center justify-between">
+                <span className="group-data-[collapsible=icon]:hidden">{t('sidebar.customServers', 'Custom Servers')}</span>
+                <Plus className="h-3 w-3 cursor-pointer hover:text-primary group-data-[collapsible=icon]:hidden" 
+                      onClick={() => window.location.href = '/mcp-servers'} />
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <CustomMcpServersList />
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -428,5 +441,90 @@ export default function SidebarLayout({
         </SidebarInset>
       </div>
     </SidebarProvider>
+  );
+}
+
+// Custom MCP Servers List Component
+function CustomMcpServersList() {
+  const { t } = useTranslation();
+  const [servers, setServers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  
+  useEffect(() => {
+    // Fetch recently used or favorite MCP servers
+    const fetchCustomServers = async () => {
+      try {
+        setLoading(true);
+        // Get current profile
+        const profileResponse = await fetch('/api/profile/current');
+        if (!profileResponse.ok) return;
+        
+        const profile = await profileResponse.json();
+        if (!profile?.uuid) return;
+        
+        // Get MCP servers for the profile
+        const response = await fetch(`/api/mcp-servers?profileUuid=${profile.uuid}&limit=5`);
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        // Filter to show only custom servers (not from registry)
+        const customServers = data.filter((server: any) => 
+          server.source === 'CUSTOM' || server.type === 'CUSTOM'
+        ).slice(0, 5);
+        
+        setServers(customServers);
+      } catch (error) {
+        console.error('Failed to fetch custom servers:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchCustomServers();
+  }, []);
+  
+  if (loading) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton disabled className="group-data-[collapsible=icon]:justify-center">
+          <div className="h-4 w-4 mr-2 group-data-[collapsible=icon]:mr-0 animate-pulse bg-muted rounded" />
+          <span className="group-data-[collapsible=icon]:hidden animate-pulse bg-muted h-4 w-20 rounded" />
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
+  
+  if (servers.length === 0) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton disabled className="group-data-[collapsible=icon]:justify-center text-muted-foreground">
+          <Unplug className="h-4 w-4 mr-2 group-data-[collapsible=icon]:mr-0 opacity-50" />
+          <span className="group-data-[collapsible=icon]:hidden text-xs">
+            {t('sidebar.noCustomServers', 'No custom servers')}
+          </span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
+  
+  return (
+    <>
+      {servers.map((server) => (
+        <SidebarMenuItem key={server.uuid}>
+          <SidebarMenuButton 
+            asChild 
+            tooltip={server.name}
+            className="group-data-[collapsible=icon]:justify-center"
+          >
+            <Link href={`/mcp-servers/${server.uuid}`}>
+              <Unplug className="h-4 w-4 mr-2 group-data-[collapsible=icon]:mr-0" />
+              <span className="group-data-[collapsible=icon]:hidden truncate">
+                {server.name}
+              </span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </>
   );
 }

@@ -132,15 +132,18 @@ export function StreamingCliToast({
           setIsComplete(true);
           isCompleteRef.current = true; // Track completion status in ref
           onComplete?.(true, message.data);
-          // Close the EventSource connection immediately to prevent error events
-          if (eventSourceRef.current && eventSourceRef.current.readyState !== EventSource.CLOSED) {
-            eventSourceRef.current.close();
-          }
-          eventSourceRef.current = null;
-          // Auto-close after showing completion for a moment
+          // Don't close the EventSource connection immediately - let the server close it
+          // This allows us to receive the final keep-alive messages
+          // Auto-close after showing completion for a longer moment
+          // This gives time for the server to send the final keep-alive message
           setTimeout(() => {
+            // Close the connection if still open
+            if (eventSourceRef.current && eventSourceRef.current.readyState !== EventSource.CLOSED) {
+              eventSourceRef.current.close();
+            }
+            eventSourceRef.current = null;
             onClose();
-          }, 2000);
+          }, 6000); // 6 seconds to ensure we see the "Discovery stream will close in 2 seconds..." message
         }
       } catch (error) {
         console.error('Failed to parse SSE message:', error);
