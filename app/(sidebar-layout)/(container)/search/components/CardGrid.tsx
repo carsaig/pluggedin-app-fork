@@ -372,6 +372,7 @@ export default function CardGrid({
               serverKey={key}
               isInstalled={isInstalled}
               isOwned={isOwned}
+              installedServerUuid={installedUuid}
               selectable={selectable}
               isSelected={isSelected}
               onInstallClick={handleInstallClick}

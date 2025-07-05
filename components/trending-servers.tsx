@@ -42,14 +42,36 @@ export function TrendingServers({ limit = 10 }: { limit?: number }) {
   useEffect(() => {
     const fetchTrending = async () => {
       try {
-        const response = await fetch(`/api/analytics/trending?limit=${limit}`);
-        if (response.ok) {
-          const data = await response.json();
-          setServers(data.data || []);
-          setError(data.error || null);
+        // First try to get data from the registry VP API
+        const { registryVPClient } = await import('@/lib/registry/pluggedin-registry-vp-client');
+        const hotServers = await registryVPClient.getHotServers(limit);
+        
+        if (hotServers && hotServers.length > 0) {
+          // Transform hot servers to trending format
+          const trendingServers = hotServers.map((hot, index) => ({
+            id: hot.server.id,
+            name: hot.server.name,
+            description: hot.server.description || '',
+            score: Math.round((hot.server.rating || 0) * 20), // Convert 0-5 rating to 0-100 score
+            installations: hot.server.installation_count || 0,
+            views: hot.server.active_installs || 0,
+            rank: index + 1,
+            change: hot.acceleration > 0 ? Math.ceil(hot.acceleration * 10) : Math.floor(hot.acceleration * 10),
+          }));
+          
+          setServers(trendingServers);
+          setError(null);
         } else {
-          setError('Failed to fetch trending servers');
-          setServers([]);
+          // Fallback to local API
+          const response = await fetch(`/api/analytics/trending?limit=${limit}`);
+          if (response.ok) {
+            const data = await response.json();
+            setServers(data.data || []);
+            setError(data.error || null);
+          } else {
+            setError('Failed to fetch trending servers');
+            setServers([]);
+          }
         }
       } catch (error) {
         console.error('Failed to fetch trending servers:', error);

@@ -131,6 +131,92 @@ export interface TrendingResponse {
   servers: ExtendedServer[];
 }
 
+// Analytics interfaces
+export interface DashboardMetrics {
+  totalInstalls: number;
+  totalApiCalls: number;
+  activeUsers: number;
+  serverHealthScore: number;
+  installVelocity: number;
+  newServersToday: number;
+  topRatedCount: number;
+  searchSuccessRate: number;
+  hottestServer?: ExtendedServer;
+  newestServer?: ExtendedServer;
+  trends: {
+    installs: { value: number; isPositive: boolean; sparkline?: number[] };
+    apiCalls: { value: number; isPositive: boolean; sparkline?: number[] };
+    users: { value: number; isPositive: boolean; sparkline?: number[] };
+    health: { value: number; isPositive: boolean; sparkline?: number[] };
+  };
+}
+
+export interface GrowthMetrics {
+  metric: string;
+  period: string;
+  current: number;
+  previous: number;
+  growth_rate: number;
+  momentum: number;
+  trend_data: Array<{ timestamp: string; value: number }>;
+}
+
+export interface ActivityEvent {
+  id: string;
+  type: 'install' | 'rating' | 'search' | 'api_call' | 'error';
+  server_id?: string;
+  server_name?: string;
+  user_id?: string;
+  timestamp: string;
+  details?: any;
+}
+
+export interface ApiMetrics {
+  endpoints: Array<{
+    path: string;
+    count: number;
+    avg_response_time: number;
+    error_rate: number;
+  }>;
+  total_calls: number;
+  avg_response_time: number;
+  error_rate: number;
+}
+
+export interface SearchAnalytics {
+  top_terms: Array<{ term: string; count: number; conversion_rate: number }>;
+  total_searches: number;
+  success_rate: number;
+  conversion_rate: number;
+  volume_trend: Array<{ timestamp: string; count: number }>;
+}
+
+export interface TimeSeriesData {
+  metric: string;
+  range: string;
+  interval: string;
+  data: Array<{ timestamp: string; value: number }>;
+}
+
+export interface HotServer {
+  server: ExtendedServer;
+  velocity: number;
+  acceleration: number;
+  momentum_score: number;
+}
+
+export interface ServerHealth {
+  server_id?: string;
+  uptime_percentage: number;
+  response_times: {
+    p50: number;
+    p90: number;
+    p99: number;
+  };
+  health_score: number;
+  last_check: string;
+}
+
 export class PluggedinRegistryVPClient {
   private baseUrl: string;
   private vpUrl: string;
@@ -507,6 +593,175 @@ export class PluggedinRegistryVPClient {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+    }
+  }
+
+  // Analytics methods
+  
+  // Get enhanced dashboard metrics
+  async getDashboardMetrics(period: 'day' | 'week' | 'month' = 'day'): Promise<DashboardMetrics | null> {
+    try {
+      const response = await fetch(`${this.vpUrl}/analytics/dashboard?period=${period}`);
+      if (!response.ok) {
+        console.error('[Registry VP] Failed to get dashboard metrics:', response.status);
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      console.log('[Registry VP] Dashboard metrics response:', data);
+      
+      // Handle potential nested data structure
+      const metrics = data.data || data;
+      
+      // Helper to extract numeric value from potential object
+      const extractNumber = (value: any): number => {
+        if (typeof value === 'number') return value;
+        if (typeof value === 'object' && value !== null) {
+          if ('value' in value) return extractNumber(value.value);
+          if ('count' in value) return extractNumber(value.count);
+          if ('total' in value) return extractNumber(value.total);
+        }
+        return 0;
+      };
+      
+      // Transform the response to match our interface
+      return {
+        totalInstalls: extractNumber(metrics.total_installations),
+        totalApiCalls: extractNumber(metrics.total_api_calls),
+        activeUsers: extractNumber(metrics.active_users),
+        serverHealthScore: extractNumber(metrics.server_health_score),
+        installVelocity: extractNumber(metrics.install_velocity),
+        newServersToday: extractNumber(metrics.new_servers_today),
+        topRatedCount: extractNumber(metrics.top_rated_count),
+        searchSuccessRate: extractNumber(metrics.search_success_rate),
+        hottestServer: metrics.hottest_server,
+        newestServer: metrics.newest_server,
+        trends: {
+          installs: metrics.trends?.installs || { value: 0, isPositive: true },
+          apiCalls: metrics.trends?.api_calls || { value: 0, isPositive: true },
+          users: metrics.trends?.users || { value: 0, isPositive: true },
+          health: metrics.trends?.health || { value: 0, isPositive: true },
+        },
+      };
+    } catch (error) {
+      console.error('[Registry VP] Error getting dashboard metrics:', error);
+      return null;
+    }
+  }
+  
+  // Get growth metrics
+  async getGrowthMetrics(metric: string, period: string): Promise<GrowthMetrics | null> {
+    try {
+      const response = await fetch(`${this.vpUrl}/analytics/growth?metric=${metric}&period=${period}`);
+      if (!response.ok) {
+        return null;
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('[Registry VP] Error getting growth metrics:', error);
+      return null;
+    }
+  }
+  
+  // Get real-time activity feed
+  async getActivityFeed(limit = 20, type?: string): Promise<ActivityEvent[]> {
+    try {
+      const params = new URLSearchParams({ limit: limit.toString() });
+      if (type) params.append('type', type);
+      
+      const response = await fetch(`${this.vpUrl}/analytics/activity?${params}`);
+      if (!response.ok) {
+        return [];
+      }
+      
+      const data = await response.json();
+      return data.events || [];
+    } catch (error) {
+      console.error('[Registry VP] Error getting activity feed:', error);
+      return [];
+    }
+  }
+  
+  // Get API performance metrics
+  async getApiMetrics(): Promise<ApiMetrics | null> {
+    try {
+      const response = await fetch(`${this.vpUrl}/analytics/api-metrics`);
+      if (!response.ok) {
+        return null;
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('[Registry VP] Error getting API metrics:', error);
+      return null;
+    }
+  }
+  
+  // Get search analytics
+  async getSearchAnalytics(): Promise<SearchAnalytics | null> {
+    try {
+      const response = await fetch(`${this.vpUrl}/analytics/search`);
+      if (!response.ok) {
+        return null;
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('[Registry VP] Error getting search analytics:', error);
+      return null;
+    }
+  }
+  
+  // Get time series data
+  async getTimeSeriesData(metric: string, range: string, interval: string): Promise<TimeSeriesData | null> {
+    try {
+      const params = new URLSearchParams({ metric, range, interval });
+      const response = await fetch(`${this.vpUrl}/analytics/time-series?${params}`);
+      if (!response.ok) {
+        return null;
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('[Registry VP] Error getting time series data:', error);
+      return null;
+    }
+  }
+  
+  // Get hot/trending servers
+  async getHotServers(limit = 10): Promise<HotServer[]> {
+    try {
+      const response = await fetch(`${this.vpUrl}/analytics/hot?limit=${limit}`);
+      if (!response.ok) {
+        return [];
+      }
+      
+      const data = await response.json();
+      return data.servers || [];
+    } catch (error) {
+      console.error('[Registry VP] Error getting hot servers:', error);
+      return [];
+    }
+  }
+  
+  // Get server health metrics
+  async getServerHealth(serverId?: string): Promise<ServerHealth | null> {
+    try {
+      const url = serverId 
+        ? `${this.vpUrl}/servers/${serverId}/health`
+        : `${this.vpUrl}/analytics/health`;
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        return null;
+      }
+      
+      return response.json();
+    } catch (error) {
+      console.error('[Registry VP] Error getting server health:', error);
+      return null;
     }
   }
 }

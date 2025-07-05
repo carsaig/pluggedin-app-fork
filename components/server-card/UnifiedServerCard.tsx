@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Eye, Package, Server, Star, UserCheck, UserPlus, Users } from 'lucide-react';
+import { BarChart3, Eye, Package, Server, Star, UserCheck, UserPlus, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ interface UnifiedServerCardProps {
   serverKey: string;
   isInstalled: boolean;
   isOwned: boolean;
+  installedServerUuid?: string;
   selectable?: boolean;
   isSelected?: boolean;
   onInstallClick: (key: string, server: McpIndex) => void;
@@ -72,6 +73,7 @@ export function UnifiedServerCard({
   serverKey,
   isInstalled,
   isOwned,
+  installedServerUuid,
   selectable = false,
   isSelected = false,
   onInstallClick,
@@ -204,6 +206,24 @@ export function UnifiedServerCard({
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 <span className="sr-only">Claim</span>
+              </Button>
+            )}
+            
+            {/* Analytics button - only show for installed servers from registry */}
+            {isInstalled && installedServerUuid && server.external_id && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    window.location.href = `/mcp-servers/${installedServerUuid}/analytics`;
+                  }
+                }}
+                className="text-xs"
+                title="View analytics"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span className="sr-only">Analytics</span>
               </Button>
             )}
             

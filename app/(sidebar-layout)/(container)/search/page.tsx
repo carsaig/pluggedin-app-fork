@@ -10,7 +10,9 @@ import useSWR from 'swr';
 
 import { createMcpServer, getMcpServers } from '@/app/actions/mcp-servers';
 import { IntelligentServerDialog } from '@/components/intelligent-server-dialog';
-import { LiveMetrics } from '@/components/live-metrics';
+import { ActivityFeed } from '@/components/analytics/activity-feed';
+import { GrowthChart } from '@/components/analytics/growth-chart';
+import { MetricsDashboard } from '@/components/analytics/metrics-dashboard';
 import { TrendingServers } from '@/components/trending-servers';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -328,8 +330,14 @@ function SearchContent() {
         )}
       </div>
 
-      {/* Live Metrics Dashboard */}
-      <LiveMetrics />
+      {/* Enhanced Analytics Dashboard */}
+      <MetricsDashboard defaultPeriod="day" />
+
+      {/* Analytics Widgets Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <GrowthChart metric="searches" defaultPeriod="day" />
+        <ActivityFeed type="search" limit={5} className="h-[300px]" />
+      </div>
 
       {/* Trending and Search Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

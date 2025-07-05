@@ -1,7 +1,7 @@
 'use client';
 
 // External imports
-import { Activity, AlertCircle, ArrowLeft, Clock, Database, Globe, RefreshCw, Save, Server, Terminal, Trash2 } from 'lucide-react';
+import { Activity, AlertCircle, ArrowLeft, BarChart3, Clock, Database, Globe, RefreshCw, Save, Server, Terminal, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { useEffect, useState } from 'react';
@@ -335,6 +335,18 @@ export default function McpServerDetailPage({
             >
               <Save className='h-4 w-4 mr-2' />
               {t('common.saveChanges')}
+            </Button>
+          )}
+          {/* Analytics Button - Only show for registry servers */}
+          {mcpServer.external_id && (
+            <Button
+              variant="outline"
+              size="default"
+              onClick={() => router.push(`/mcp-servers/${uuid}/analytics`)}
+              className="shadow-sm"
+            >
+              <BarChart3 size={16} className="mr-2" />
+              {t('mcpServers.actions.analytics', 'Analytics')}
             </Button>
           )}
           {/* Add Discover Button */}
