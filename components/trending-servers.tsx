@@ -37,6 +37,7 @@ const getRankIcon = (rank: number) => {
 export function TrendingServers({ limit = 10 }: { limit?: number }) {
   const [servers, setServers] = useState<TrendingServer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTrending = async () => {
@@ -45,17 +46,23 @@ export function TrendingServers({ limit = 10 }: { limit?: number }) {
         if (response.ok) {
           const data = await response.json();
           setServers(data.data || []);
+          setError(data.error || null);
+        } else {
+          setError('Failed to fetch trending servers');
+          setServers([]);
         }
       } catch (error) {
         console.error('Failed to fetch trending servers:', error);
+        setError('Network error');
+        setServers([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchTrending();
-    // Refresh every minute
-    const interval = setInterval(fetchTrending, 60000);
+    // Refresh every 5 minutes (reduced frequency)
+    const interval = setInterval(fetchTrending, 300000);
     return () => clearInterval(interval);
   }, [limit]);
 
@@ -88,8 +95,15 @@ export function TrendingServers({ limit = 10 }: { limit?: number }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          {servers.map((server, index) => (
+        {servers.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <TrendingUp className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">No trending data available</p>
+            <p className="text-xs mt-1">Check back later for trending servers</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {servers.map((server, index) => (
             <motion.div
               key={server.id}
               initial={{ opacity: 0, x: -20 }}
@@ -97,7 +111,7 @@ export function TrendingServers({ limit = 10 }: { limit?: number }) {
               transition={{ duration: 0.3, delay: index * 0.05 }}
             >
               <Link
-                href={`/search?server=${server.id}`}
+                href={`/search?query=${encodeURIComponent(server.name)}`}
                 className="block rounded-lg border p-3 transition-colors hover:bg-accent"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -135,7 +149,8 @@ export function TrendingServers({ limit = 10 }: { limit?: number }) {
               </Link>
             </motion.div>
           ))}
-        </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
